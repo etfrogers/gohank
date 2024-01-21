@@ -2,7 +2,6 @@ package gohank
 
 import (
 	"math"
-	_ "math/cmplx"
 )
 
 const pi = math.Pi
@@ -16,7 +15,11 @@ const (
 	YP
 )
 
-func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float64) {
+func (t BesselFunType) isNonDerivative() bool {
+	return t == J || t == Y
+}
+
+func besselZeros(funcType BesselFunType, order int, nZeros int, precision float64) (z []float64) {
 	//BESSEL_ZEROS: Finds the first n zeros of a bessel function
 	//
 	//	z = bessel_zeros(d, a, n, e)
@@ -40,8 +43,7 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 	//
 	// Translated from Adam Wyatt's Matlab version
 	a := float64(order)
-	funcType++
-	z = make([]float64, n)
+	z = make([]float64, nZeros)
 
 	aa := math.Pow(a, 2)
 	mu := 4 * aa
@@ -50,7 +52,7 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 	mu4 := math.Pow(mu, 4)
 
 	var p, p0, p1, q1 float64
-	if funcType < 3 {
+	if funcType.isNonDerivative() {
 		p = 7*mu - 31
 		p0 = mu - 1
 
@@ -74,7 +76,7 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 	}
 
 	var t float64
-	if (funcType == 1) || (funcType == 4) {
+	if (funcType == J) || (funcType == YP) {
 		t = .25
 	} else {
 		t = .75
@@ -82,7 +84,7 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 	tt := 4 * t
 
 	var pp1, qq1 float64
-	if funcType < 3 {
+	if funcType.isNonDerivative() {
 		pp1 = 5. / 48.
 		qq1 = -5. / 36.
 	} else {
@@ -100,10 +102,10 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 	var a1 int = 3*int(a) - 8
 	// psi = (.5*a + .25)*pi;
 
-	for s := 1; s <= n; s++ {
+	for s := 1; s <= nZeros; s++ {
 		var x, w float64
 		var j int
-		if (order == 0) && (s == 1) && (funcType == 3) {
+		if (order == 0) && (s == 1) && (funcType == JP) {
 			x = 0
 			j = 0
 		} else {
@@ -114,13 +116,13 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 			} else {
 				if s == 1 {
 					switch funcType {
-					case (1):
+					case J:
 						x = -2.33811
-					case (2):
+					case Y:
 						x = -1.17371
-					case (3):
+					case JP:
 						x = -1.01879
-					case 4:
+					case YP:
 						x = -2.29444
 					default:
 						panic("not implemented")
@@ -135,7 +137,7 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 				w = 1 / math.Cos(v)
 				xx := 1 - math.Pow(w, 2)
 				c := math.Sqrt(u / xx)
-				if funcType < 3 {
+				if funcType.isNonDerivative() {
 					x = w * (a + c*(-5/u-c*(6-10/xx))/(48*a*u))
 				} else {
 					x = w * (a + c*(7/u+c*(18-14/xx))/(48*a*u))
@@ -143,14 +145,14 @@ func besselZeros(funcType BesselFunType, order int, n int, e float64) (z []float
 			}
 			j = 0
 
-			for (j == 0) || ((j < 5) && (math.Abs(w/x) > e)) {
+			for (j == 0) || ((j < 5) && (math.Abs(w/x) > precision)) {
 				xx := math.Pow(x, 2)
 				x4 := math.Pow(x, 4)
 				a2 := aa - xx
 				r0 := bessr(funcType, order, x)
 				j = j + 1
 				var q, u float64
-				if funcType < 3 {
+				if funcType.isNonDerivative() {
 					u = r0
 					w = 6 * x * (2*a + 1)
 					p = (1 - 4*a2) / w
@@ -199,13 +201,13 @@ func bessr(funType BesselFunType, order int, x float64) (Jr float64) {
 	Jr = 0.0
 	a := float64(order)
 	switch funType {
-	case 1:
+	case J:
 		Jr = math.Jn(order, x) / math.Jn(order+1, x)
-	case 2:
+	case Y:
 		Jr = math.Yn(order, x) / math.Yn(order+1, x)
-	case 3:
+	case JP:
 		Jr = a/x - math.Jn(order+1, x)/math.Jn(order, x)
-	case 4:
+	case YP:
 		Jr = a/x - math.Yn(order+1, x)/math.Yn(order, x)
 	}
 	return
