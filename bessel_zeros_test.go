@@ -3,6 +3,7 @@ package gohank
 import (
 	"encoding/csv"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,11 +29,25 @@ const JP_ZEROS string = `#
 
 //	16.4706
 
-var j_zeros, jp_zeros [][]float64
+const Y_ZEROS = `#
+0.89357697	3.95767842	7.08605106	10.22234504	13.36109747
+2.19714133	5.42968104	8.59600587	11.74915483	14.89744213
+3.38424177	6.79380751	10.02347798	13.20998671	16.37896656
+4.52702466	8.09755376	11.39646674	14.62307774	17.81845523
+5.64514789	9.36162062	12.73014447	15.99962709	19.22442896`
+
+const YP_ZEROS = `#
+2.19714133	5.42968104	8.59600587	11.74915483	14.89744213
+3.68302286	6.94149995	10.12340466	13.28575816	16.44005801
+5.00258293	8.3507247	11.57419547	14.76090931	17.93128594
+6.25363321	9.69878798	12.97240905	16.1904472	19.38238845
+7.46492174	11.00516915	14.33172352	17.58443602	20.80106234`
+
+var all_zeros [][][]float64
 
 const maxOrder = 5
 
-func parseZeros(str string) [][]float64 {
+func getRecords(str string) [][]string {
 	r := csv.NewReader(strings.NewReader(str))
 	r.Comma = '\t'
 	r.Comment = '#'
@@ -41,13 +56,34 @@ func parseZeros(str string) [][]float64 {
 	if err != nil {
 		panic(err)
 	}
+	return records
+}
 
+func parseZerosPython(str string) [][]float64 {
+	records := getRecords(str)
+	floats := make([][]float64, maxOrder)
+	for order := 0; order < maxOrder; order++ {
+		floats[order] = make([]float64, len(records))
+		for i := 0; i < len(records); i++ {
+			var err error
+			floats[order][i], err = strconv.ParseFloat(records[order][i], 64)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+	return floats
+}
+
+func parseZerosWA(str string) [][]float64 {
+	records := getRecords(str)
 	floats := make([][]float64, maxOrder)
 	for order := 0; order < maxOrder; order++ {
 		floats[order] = make([]float64, len(records))
 		for i := 0; i < len(records); i++ {
 			// order+ 1 as the first col is an index
 			col := order + 1
+			var err error
 			floats[order][i], err = strconv.ParseFloat(records[i][col], 64)
 			if err != nil {
 				panic(err)
@@ -58,27 +94,45 @@ func parseZeros(str string) [][]float64 {
 }
 
 func init() {
-	j_zeros = parseZeros(J_ZEROS)
-	jp_zeros = parseZeros(JP_ZEROS)
+	var j_zeros, jp_zeros, y_zeros, yp_zeros [][]float64
+	j_zeros = parseZerosWA(J_ZEROS)
+	jp_zeros = parseZerosWA(JP_ZEROS)
+	y_zeros = parseZerosPython(Y_ZEROS)
+	yp_zeros = parseZerosPython(YP_ZEROS)
+	all_zeros = [][][]float64{j_zeros, y_zeros, jp_zeros, yp_zeros}
 }
 
-func TestJAgainstHardCodedZeros(t *testing.T) {
-	for order := range j_zeros {
+func TestAgainstHardCodedZeros(t *testing.T) {
+	for funType := 0; funType <= int(YP); funType++ {
+		these_zeros := all_zeros[funType]
+		for order := range these_zeros {
+			t.Run(fmt.Sprint(order), func(t *testing.T) {
+				expected := these_zeros[order]
+				actual := besselZeros(BesselFunType(funType), order, len(expected), 1e-6)
+				assert.InDeltaSlice(t, expected, actual, 1e-4)
+			})
+		}
+	}
+}
+
+func TestEvaluationAtZeroJ(t *testing.T) {
+	for order := 0; order < 20; order++ {
 		t.Run(fmt.Sprint(order), func(t *testing.T) {
-			expected := j_zeros[order]
-			actual := besselZeros(J, order, len(expected), 1e-6)
-			assert.InDeltaSlice(t, expected, actual, 1e-4)
+			zeros := besselZeros(J, order, 100, 1e-6)
+			for _, v := range zeros {
+				assert.InDelta(t, 0, math.Jn(order, v), 1e-6)
+			}
 		})
 	}
 }
 
-func TestJPAgainstHardCodedZeros(t *testing.T) {
-	for order := range j_zeros {
+func TestEvaluationAtZeroY(t *testing.T) {
+	for order := 0; order < 20; order++ {
 		t.Run(fmt.Sprint(order), func(t *testing.T) {
-			expected := jp_zeros[order]
-			actual := besselZeros(JP, order, len(expected), 1e-6)
-			assert.InDeltaSlice(t, expected, actual, 1e-4)
+			zeros := besselZeros(Y, order, 100, 1e-6)
+			for _, v := range zeros {
+				assert.InDelta(t, 0, math.Yn(order, v), 1e-6)
+			}
 		})
-
 	}
 }
