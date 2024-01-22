@@ -1,0 +1,15 @@
+__pycache__
+*.m~
+utils-*.zip
+.cache/
+.idea/
+docs/build
+docs/auto_examples
+.coverage
+build/
+dist/
+pyhank.egg-info/
+.DS_Store
+*.lprof
+*.py
+tests/matlab
