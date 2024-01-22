@@ -90,17 +90,13 @@ def test_energy_conservation(shape: Callable,
 type HankelTestSuite struct {
 	suite.Suite
 	radius      mat.Vector
-	transformer []HankelTransform
+	transformer HankelTransform
+	order       int
 }
 
 func (suite *HankelTestSuite) SetupTest() {
 	suite.radius = linspace(0, 3, 1024)
-	maxOrder := 4
-	suite.transformer = make([]HankelTransform, maxOrder+1)
-	for order := 0; order <= maxOrder; order++ {
-		suite.transformer[order] = NewTransformFromRadius(order, suite.radius)
-	}
-	// return HankelTransform(order, radial_grid=radius)
+	suite.transformer = NewTransformFromRadius(suite.order, suite.radius)
 }
 
 func randomVecLike(shape mat.Vector) mat.Vector {
@@ -109,10 +105,9 @@ func randomVecLike(shape mat.Vector) mat.Vector {
 }
 
 func (t *HankelTestSuite) TestRoundTrip() {
-	// TODO iterate over order
 	fun := randomVecLike(t.radius)
-	ht := t.transformer[0].QDHT(fun)
-	reconstructed := t.transformer[0].IQDHT(ht)
+	ht := t.transformer.QDHT(fun)
+	reconstructed := t.transformer.IQDHT(ht)
 	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9)
 }
 
@@ -124,7 +119,12 @@ func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float
 }
 
 func TestSuite(t *testing.T) {
-	suite.Run(t, new(HankelTestSuite))
+	maxOrder := 4
+	for order := 0; order <= maxOrder; order++ {
+		hs := new(HankelTestSuite)
+		hs.order = order
+		suite.Run(t, hs)
+	}
 }
 
 /*
