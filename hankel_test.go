@@ -1,11 +1,17 @@
 package gohank
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"gonum.org/v1/gonum/mat"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/plotutil"
+	"gonum.org/v1/plot/vg"
 )
 
 /*from typing import Callable
@@ -26,26 +32,6 @@ all_shapes = smooth_shapes.copy()
 all_shapes.append(lambda r: np.random.random(r.size))
 
 orders = list(range(0, 5))
-
-
-def generalised_top_hat(r: np.ndarray, a: float, p: int) -> np.ndarray:
-    top_hat = np.zeros_like(r)
-    top_hat[r <= a] = 1
-    return r ** p * top_hat
-
-
-def generalised_jinc(v: np.ndarray, a: float, p: int):
-    val = a ** (p + 1) * scipy_bessel.jv(p + 1, 2 * np.pi * a * v) / v
-    if p == -1:
-        val[v == 0] = np.inf
-    elif p == -2:
-        val[v == 0] = -np.pi
-    elif p == 0:
-        val[v == 0] = np.pi * a ** 2
-    else:
-        val[v == 0] = 0
-    return val
-
 
 @pytest.fixture(params=orders)
 def transformer(request, radius) -> HankelTransform:
@@ -89,14 +75,14 @@ def test_energy_conservation(shape: Callable,
 
 type HankelTestSuite struct {
 	suite.Suite
-	radius      mat.Vector
+	radius      mat.VecDense
 	transformer HankelTransform
 	order       int
 }
 
 func (suite *HankelTestSuite) SetupTest() {
-	suite.radius = linspace(0, 3, 1024)
-	suite.transformer = NewTransformFromRadius(suite.order, suite.radius)
+	suite.radius = *linspace(0, 3, 1024)
+	suite.transformer = NewTransformFromRadius(suite.order, &suite.radius)
 }
 
 func randomVecLike(shape mat.Vector) mat.Vector {
@@ -105,10 +91,58 @@ func randomVecLike(shape mat.Vector) mat.Vector {
 }
 
 func (t *HankelTestSuite) TestRoundTrip() {
-	fun := randomVecLike(t.radius)
+	fun := randomVecLike(&t.radius)
 	ht := t.transformer.QDHT(fun)
 	reconstructed := t.transformer.IQDHT(ht)
 	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9)
+}
+
+func (t *HankelTestSuite) TestTopHat() {
+	for _, a := range []float64{1, 1.5, 0.1} {
+		t.Run(fmt.Sprint(a), func() {
+			f := generalisedTopHat(&t.transformer.r, a, t.order)
+			plotVec("Top Hat", &t.transformer.r, f)
+			expected_ht := generalisedJinc(&t.transformer.v, a, t.order)
+			actual_ht := t.transformer.QDHT(f)
+			plotVec("Jinc", &t.transformer.v, expected_ht, actual_ht)
+			assert.Less(t.T(), meanAbsError(expected_ht, actual_ht), 1e-3)
+		})
+
+	}
+}
+
+func TestGeneralisedJincZero(t *testing.T) {
+	for _, a := range []float64{1, 0.7, 0.1, 136., 1e-6} {
+		for p := -10; p < 10; p++ {
+			t.Run(fmt.Sprintf("%f, %d", a, p), func(t *testing.T) {
+				if p == -1 {
+					t.Skip("Skipping test for p=-1 as 1/eps does not go to inf correctly")
+				}
+				eps := 1e-200
+				if p == -2 {
+					eps = 1e-5 / a
+				}
+				v := mat.NewVecDense(2, []float64{0, eps})
+				val := generalisedJinc(v, a, p)
+
+				tolerance := 2e-9
+				assert.InDelta(t, val.AtVec(0), val.AtVec(1), tolerance)
+			})
+		}
+	}
+}
+
+func meanAbsError(v1, v2 mat.Vector) float64 {
+	if v1.Len() != v2.Len() {
+		panic("vector sizes mismatched")
+	}
+	length := v1.Len()
+	sum := 0.
+	for i := 0; i < length; i++ {
+		err := math.Abs(v1.AtVec(i) - v2.AtVec(i))
+		sum += err
+	}
+	return sum / float64(length)
 }
 
 func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64) {
@@ -125,6 +159,78 @@ func TestSuite(t *testing.T) {
 		hs.order = order
 		suite.Run(t, hs)
 	}
+}
+
+func generalisedTopHat(r mat.Vector, a float64, p int) *mat.VecDense {
+	topHat := mat.NewVecDense(r.Len(), nil)
+	for i := 0; i < r.Len(); i++ {
+		if r.AtVec(i) <= a {
+			topHat.SetVec(i, math.Pow(r.AtVec(i), float64(p)))
+		}
+		// othwerise 0
+	}
+	return topHat
+}
+
+func generalisedJinc(v mat.Vector, a float64, p int) *mat.VecDense {
+	val := mat.NewVecDense(v.Len(), nil)
+	for i := 0; i < v.Len(); i++ {
+		v_ := v.AtVec(i)
+		if v_ == 0. {
+			switch {
+			case p == -1:
+				val.SetVec(i, math.Inf(1))
+			case p == -2:
+				val.SetVec(i, -math.Pi)
+			case p == 0:
+				val.SetVec(i, math.Pi*math.Pow(a, 2))
+			default:
+				val.SetVec(i, 0)
+			}
+		} else {
+			prefactor := math.Pow(a, float64(p+1))
+			x := 2 * math.Pi * a * v.AtVec(i)
+			j := math.Jn(p+1, x)
+			elem := prefactor * j / v.AtVec(i)
+			val.SetVec(i, elem)
+		}
+	}
+	return val
+}
+
+func plotVec(name string, x mat.Vector, ys ...mat.Vector) {
+	p := plot.New()
+	p.Title.Text = name
+	p.X.Label.Text = "X"
+	p.Y.Label.Text = "Y"
+
+	for i, y := range ys {
+		lpLine, _, err := plotter.NewLinePoints(pointsFromVec(x, y))
+		lpLine.LineStyle.Color = plotutil.DefaultColors[i]
+		// err := plotutil.AddLinePoints(p,
+		// 	fmt.Sprint(i), pointsFromVec(x, y),
+		// 	// "Second", randomPoints(15),
+		// 	// "Third", randomPoints(15)
+		// )
+		p.Add(lpLine)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Save the plot to a PNG file.
+	if err := p.Save(4*vg.Inch, 4*vg.Inch, name+".png"); err != nil {
+		panic(err)
+	}
+}
+
+func pointsFromVec(x, y mat.Vector) plotter.XYs {
+	pts := make(plotter.XYs, x.Len())
+	for i := range pts {
+		pts[i].X = x.AtVec(i)
+		pts[i].Y = y.AtVec(i)
+	}
+	return pts
 }
 
 /*
@@ -164,16 +270,6 @@ def test_round_trip_with_interpolation(shape: Callable,
     reconstructed = transformer.to_original_r(reconstructed_hr)
 
     assert np.allclose(func, reconstructed, rtol=2e-4)
-
-
-@pytest.mark.parametrize('a', [1, 0.7, 0.1, 136., 1e-6])
-@pytest.mark.parametrize('p', range(-10, 9))
-def test_generalised_jinc_zero(a: float, p: int):
-    if p == -1:
-        pytest.skip('Skipping test for p=-11 as 1/eps does not go to inf correctly')
-    v = np.array([0, 1e-200])
-    val = generalised_jinc(v, a, p)
-    assert np.isclose(val[0], val[1])
 
 
 def test_original_r_k_grid():
@@ -351,15 +447,6 @@ def test_jinc2d(transformer: HankelTransform, a: float, axis: int, two_d_size: i
         expected_ht_array = np.outer(second_axis, expected_ht)
     actual_ht = transformer.qdht(f_array, axis=axis)
     error = np.mean(np.abs(expected_ht_array-actual_ht))
-    assert error < 1e-3
-
-
-@pytest.mark.parametrize('a', [1, 1.5, 0.1])
-def test_top_hat(transformer: HankelTransform, a: float):
-    f = generalised_top_hat(transformer.r, a, transformer.order)
-    expected_ht = generalised_jinc(transformer.v, a, transformer.order)
-    actual_ht = transformer.qdht(f)
-    error = np.mean(np.abs(expected_ht-actual_ht))
     assert error < 1e-3
 
 

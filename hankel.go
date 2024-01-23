@@ -62,7 +62,7 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	h.originalKGrid = nil
 
 	// Calculate N+1 roots must be calculated before max_radius can be derived from k_grid
-	alpha := besselZeros(1, h.order, h.nPoints+1, 1e-6)
+	alpha := besselZeros(J, h.order, h.nPoints+1, 1e-6)
 	//    alpha = scipy_bessel.jn_zeros(self.order, self.n_points + 1)
 
 	h.alpha_n1 = alpha[h.nPoints]
@@ -78,7 +78,7 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	h.r = *mat.NewVecDense(h.nPoints, nil)
 	h.r.ScaleVec(h.maxRadius/h.alpha_n1, h.alpha)
 	h.v = *mat.NewVecDense(h.nPoints, nil)
-	h.v.ScaleVec(2*PI*h.maxRadius, h.alpha)
+	h.v.ScaleVec(1/(2*PI*h.maxRadius), h.alpha)
 	h.kr = *mat.NewVecDense(h.nPoints, nil)
 	h.kr.ScaleVec(2*PI, &h.v)
 	h.vMax = h.alpha_n1 / (2 * PI * h.maxRadius)
@@ -199,7 +199,7 @@ func (h *HankelTransform) IQDHT(fv mat.Vector) mat.Vector {
 	//     return np.core.swapaxes(fr, axis, -2)
 }
 
-func linspace(start, stop float64, N int) mat.Vector {
+func linspace(start, stop float64, N int) *mat.VecDense {
 	v := mat.NewVecDense(N, nil)
 	step := (stop - start) / float64(N-1)
 	for i := 0; i < N; i++ {
