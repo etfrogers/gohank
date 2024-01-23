@@ -8,10 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"gonum.org/v1/gonum/mat"
-	"gonum.org/v1/plot"
-	"gonum.org/v1/plot/plotter"
-	"gonum.org/v1/plot/plotutil"
-	"gonum.org/v1/plot/vg"
 )
 
 /*from typing import Callable
@@ -101,10 +97,8 @@ func (t *HankelTestSuite) TestTopHat() {
 	for _, a := range []float64{1, 1.5, 0.1} {
 		t.Run(fmt.Sprint(a), func() {
 			f := generalisedTopHat(&t.transformer.r, a, t.order)
-			plotVec("Top Hat", &t.transformer.r, f)
 			expected_ht := generalisedJinc(&t.transformer.v, a, t.order)
 			actual_ht := t.transformer.QDHT(f)
-			plotVec("Jinc", &t.transformer.v, expected_ht, actual_ht)
 			assert.Less(t.T(), meanAbsError(expected_ht, actual_ht), 1e-3)
 		})
 
@@ -196,41 +190,6 @@ func generalisedJinc(v mat.Vector, a float64, p int) *mat.VecDense {
 		}
 	}
 	return val
-}
-
-func plotVec(name string, x mat.Vector, ys ...mat.Vector) {
-	p := plot.New()
-	p.Title.Text = name
-	p.X.Label.Text = "X"
-	p.Y.Label.Text = "Y"
-
-	for i, y := range ys {
-		lpLine, _, err := plotter.NewLinePoints(pointsFromVec(x, y))
-		lpLine.LineStyle.Color = plotutil.DefaultColors[i]
-		// err := plotutil.AddLinePoints(p,
-		// 	fmt.Sprint(i), pointsFromVec(x, y),
-		// 	// "Second", randomPoints(15),
-		// 	// "Third", randomPoints(15)
-		// )
-		p.Add(lpLine)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	// Save the plot to a PNG file.
-	if err := p.Save(4*vg.Inch, 4*vg.Inch, name+".png"); err != nil {
-		panic(err)
-	}
-}
-
-func pointsFromVec(x, y mat.Vector) plotter.XYs {
-	pts := make(plotter.XYs, x.Len())
-	for i := range pts {
-		pts[i].X = x.AtVec(i)
-		pts[i].Y = y.AtVec(i)
-	}
-	return pts
 }
 
 /*
