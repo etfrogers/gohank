@@ -7,6 +7,8 @@ require (
 	gonum.org/v1/gonum v0.14.0
 )
 
+require golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b // indirect
+
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
