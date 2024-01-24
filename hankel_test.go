@@ -41,7 +41,7 @@ def test_parsevals_theorem(shape: Callable,
                            transformer: HankelTransform):
     # As per equation 11 of Guizar-Sicairos, the UNSCALED transform is unitary,
     # i.e. if we pass in the unscaled fr (=Fr), the unscaled fv (=Fv)should have the
-    # same sum of abs val^2. Here the unscale transform is simply given by
+    # same sum of abs val^2. Here the unscaled transform is simply given by
     # ht = transformer.T @ func
     func = shape(radius)
     intensity_before = np.abs(func)**2
@@ -93,6 +93,22 @@ func (t *HankelTestSuite) TestRoundTrip() {
 	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9)
 }
 
+// -------------------
+// Test known HT pairs
+// -------------------
+
+func (t *HankelTestSuite) TestJinc() {
+	for _, a := range []float64{1, 0.7, 0.1} {
+		t.Run(fmt.Sprint(a), func() {
+			f := generalisedJinc(&t.transformer.r, a, t.order)
+			expected_ht := generalisedTopHat(&t.transformer.v, a, t.order)
+			actual_ht := t.transformer.QDHT(f)
+			err := meanAbsError(expected_ht, actual_ht)
+			assert.Less(t.T(), err, 1e-3)
+		})
+	}
+}
+
 func (t *HankelTestSuite) TestTopHat() {
 	for _, a := range []float64{1, 1.5, 0.1} {
 		t.Run(fmt.Sprint(a), func() {
@@ -105,6 +121,7 @@ func (t *HankelTestSuite) TestTopHat() {
 	}
 }
 
+// Internal test of generalised jinc func
 func TestGeneralisedJincZero(t *testing.T) {
 	for _, a := range []float64{1, 0.7, 0.1, 136., 1e-6} {
 		for p := -10; p < 10; p++ {
@@ -378,17 +395,7 @@ def test_round_trip_k_interpolation_2d(radius: np.ndarray, order: int, shape: Ca
     assert np.allclose(func, reconstructed_func, rtol=1e-4)
 
 
-# -------------------
-# Test known HT pairs
-# -------------------
 
-@pytest.mark.parametrize('a', [1, 0.7, 0.1])
-def test_jinc(transformer: HankelTransform, a: float):
-    f = generalised_jinc(transformer.r, a, transformer.order)
-    expected_ht = generalised_top_hat(transformer.v, a, transformer.order)
-    actual_ht = transformer.qdht(f)
-    error = np.mean(np.abs(expected_ht-actual_ht))
-    assert error < 1e-3
 
 
 @pytest.mark.parametrize('two_d_size', [1, 100, 27])
