@@ -4,8 +4,6 @@ import (
 	"math"
 )
 
-const pi = math.Pi
-
 type BesselFunType int
 
 const (

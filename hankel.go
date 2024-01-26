@@ -13,7 +13,7 @@ import scipy.special as scipy_bessel
 from scipy import interpolate
 */
 
-const PI = math.Pi
+const pi float64 = math.Pi
 
 type HankelTransform struct {
 	T                                 mat.Dense
@@ -78,10 +78,10 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	h.r = *mat.NewVecDense(h.nPoints, nil)
 	h.r.ScaleVec(h.maxRadius/h.alpha_n1, h.alpha)
 	h.v = *mat.NewVecDense(h.nPoints, nil)
-	h.v.ScaleVec(1/(2*PI*h.maxRadius), h.alpha)
+	h.v.ScaleVec(1/(2*pi*h.maxRadius), h.alpha)
 	h.kr = *mat.NewVecDense(h.nPoints, nil)
-	h.kr.ScaleVec(2*PI, &h.v)
-	h.vMax = h.alpha_n1 / (2 * PI * h.maxRadius)
+	h.kr.ScaleVec(2*pi, &h.v)
+	h.vMax = h.alpha_n1 / (2 * pi * h.maxRadius)
 	h.S = h.alpha_n1
 
 	// Calculate hankel matrix and vectors
@@ -94,9 +94,8 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	jp.Outer(1/h.S, h.alpha, h.alpha)
 	jp.Apply(func(i, j int, v float64) float64 { return math.Jn(order, v) }, jp)
 
-	jp1_ := mat.NewDense(h.nPoints, 1, nil)
-	jp1_.Apply(func(i, j int, v float64) float64 { return math.Abs(math.Jn(order+1, v)) }, h.alpha)
-	jp1 := jp1_.ColView(0)
+	jp1 := mat.NewVecDense(h.nPoints, nil)
+	ApplyVec(func(v float64) float64 { return math.Abs(math.Jn(order+1, v)) }, jp1, h.alpha)
 	jp1Mat := mat.NewDense(h.nPoints, h.nPoints, nil)
 	jp1Mat.Outer(h.S, jp1, jp1)
 	h.T = *mat.NewDense(h.nPoints, h.nPoints, nil)
@@ -199,15 +198,6 @@ func (h *HankelTransform) IQDHT(fv mat.Vector) mat.Vector {
 	//     return np.core.swapaxes(fr, axis, -2)
 }
 
-func linspace(start, stop float64, N int) *mat.VecDense {
-	v := mat.NewVecDense(N, nil)
-	step := (stop - start) / float64(N-1)
-	for i := 0; i < N; i++ {
-		v.SetVec(i, float64(i)*step)
-	}
-	return v
-}
-
 func (t *HankelTransform) getScalingFactors(f mat.Vector) (jr, jv mat.Vector) {
 	// if f.ndim > 1 {
 	// panic("not implemented")
@@ -222,6 +212,27 @@ func (t *HankelTransform) getScalingFactors(f mat.Vector) (jr, jv mat.Vector) {
 	jv = &(t.JV)
 	// }
 	return jr, jv
+}
+
+// -------------------
+// NON CLASS FUNCTIONS
+// -------------------
+func linspace(start, stop float64, N int) *mat.VecDense {
+	v := mat.NewVecDense(N, nil)
+	step := (stop - start) / float64(N-1)
+	for i := 0; i < N; i++ {
+		v.SetVec(i, float64(i)*step)
+	}
+	return v
+}
+
+func ApplyVec(fn func(float64) float64, dest *mat.VecDense, src mat.Vector) {
+	if dest.Len() != src.Len() {
+		panic("input vectors must be the same length")
+	}
+	for i := 0; i < src.Len(); i++ {
+		dest.SetVec(i, fn(src.AtVec(i)))
+	}
 }
 
 /*

@@ -3,6 +3,7 @@ package gohank
 import (
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,10 +40,10 @@ def transformer(request, radius) -> HankelTransform:
 def test_parsevals_theorem(shape: Callable,
                            radius: np.ndarray,
                            transformer: HankelTransform):
-    # As per equation 11 of Guizar-Sicairos, the UNSCALED transform is unitary,
-    # i.e. if we pass in the unscaled fr (=Fr), the unscaled fv (=Fv)should have the
-    # same sum of abs val^2. Here the unscaled transform is simply given by
-    # ht = transformer.T @ func
+    // As per equation 11 of Guizar-Sicairos, the UNSCALED transform is unitary,
+    // i.e. if we pass in the unscaled fr (=Fr), the unscaled fv (=Fv)should have the
+    // same sum of abs val^2. Here the unscaled transform is simply given by
+    // ht = transformer.T @ func
     func = shape(radius)
     intensity_before = np.abs(func)**2
     energy_before = np.sum(intensity_before)
@@ -120,6 +121,159 @@ func (t *HankelTestSuite) TestTopHat() {
 
 	}
 }
+
+// NO ORDER
+func (t *HankelTestSuite) TestGaussian() {
+	// Note the definition in Guizar-Sicairos varies by 2*pi in
+	// both scaling of the argument (so use kr rather than v) and
+	// scaling of the magnitude.
+	for _, a := range []float64{2, 5, 10} {
+		t.Run(fmt.Sprint(a), func() {
+			transformer := NewTransformFromRadius(0, &t.radius)
+			f := mat.NewVecDense(transformer.r.Len(), nil)
+			a2 := math.Pow(a, 2)
+			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, f, &transformer.r)
+			expected_ht := mat.NewVecDense(transformer.r.Len(), nil)
+			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, expected_ht, &transformer.kr)
+			actual_ht := transformer.QDHT(f)
+			assertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9)
+		})
+	}
+}
+
+// NO ORDER
+func (t *HankelTestSuite) TestInverseGaussian() {
+	// Note the definition in Guizar-Sicairos varies by 2*pi in
+	// both scaling of the argument (so use kr rather than v) and
+	// scaling of the magnitude.
+	for _, a := range []float64{2, 5, 10} {
+		t.Run(fmt.Sprint(a), func() {
+			transformer := NewTransformFromRadius(0, &t.radius)
+			ht := mat.NewVecDense(transformer.r.Len(), nil)
+			a2 := math.Pow(a, 2)
+			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, ht, &transformer.kr)
+			// ht = 2 * nppi * (1 / (2 * a * *2)) * np.exp(-transformer.kr**2/(4*a**2))
+			actual_f := transformer.IQDHT(ht)
+			expected_f := mat.NewVecDense(transformer.r.Len(), nil)
+			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, expected_f, &transformer.r)
+			// expected_f = np.exp(-a * *2 * transformer.r * *2)
+			assertInDeltaVec(t.T(), expected_f, actual_f, 1e-9)
+		})
+	}
+}
+
+// @pytest.mark.parametrize('axis', [0, 1])
+// func (t *HankelTestSuit) test_gaussian_2d(axis int, radius, np.ndarray){
+//     // Note the definition in Guizar-Sicairos varies by 2*pi in
+//     // both scaling of the argument (so use kr rather than v) and
+//     // scaling of the magnitude.
+//     transformer = HankelTransform(order=0, radial_grid=radius)
+//     a = np.linspace(2, 10)
+//     dims_a = np.ones(2, np.int)
+//     dims_a[1-axis] = len(a)
+//     dims_r = np.ones(2, np.int)
+//     dims_r[axis] = len(transformer.r)
+//     a_reshaped = np.reshape(a, dims_a)
+//     r_reshaped = np.reshape(transformer.r, dims_r)
+//     kr_reshaped = np.reshape(transformer.kr, dims_r)
+//     f = np.exp(-a_reshaped**2 * r_reshaped**2)
+//     expected_ht = 2*np.pi*(1 / (2 * a_reshaped**2)) * np.exp(-kr_reshaped**2 / (4 * a_reshaped**2))
+//     actual_ht = transformer.qdht(f, axis=axis)
+//     assert np.allclose(expected_ht, actual_ht)
+
+// @pytest.mark.parametrize('axis', [0, 1])
+// func (t *HankelTestSuit) test_inverse_gaussian_2d(axis int, radius, np.ndarray){
+//     // Note the definition in Guizar-Sicairos varies by 2*pi in
+//     // both scaling of the argument (so use kr rather than v) and
+//     // scaling of the magnitude.
+//     transformer = HankelTransform(order=0, radial_grid=radius)
+//     a = np.linspace(2, 10)
+//     dims_a = np.ones(2, np.int)
+//     dims_a[1-axis] = len(a)
+//     dims_r = np.ones(2, np.int)
+//     dims_r[axis] = len(transformer.r)
+//     a_reshaped = np.reshape(a, dims_a)
+//     r_reshaped = np.reshape(transformer.r, dims_r)
+//     kr_reshaped = np.reshape(transformer.kr, dims_r)
+//     ht = 2*np.pi*(1 / (2 * a_reshaped**2)) * np.exp(-kr_reshaped**2 / (4 * a_reshaped**2))
+//     actual_f = transformer.iqdht(ht, axis=axis)
+//     expected_f = np.exp(-a_reshaped ** 2 * r_reshaped ** 2)
+//     assert np.allclose(expected_f, actual_f)
+/*
+// NO ORDER
+func (t *HankelTestSuite) test_1_over_r2_plus_z2(a float64) {
+	// Note the definition in Guizar-Sicairos varies by 2*pi in
+	// both scaling of the argument (so use kr rather than v) and
+	// scaling of the magnitude.
+	for _, a := range []float64{2, 5, 10} {
+		t.Run(fmt.Sprint(a), func() {
+			transformer = NewTransform(0, 1024, 50)
+			f = 1 / (transformer.r**2 + a**2)
+			// kn cannot handle complex arguments, so a must be real
+			expected_ht = 2 * np.pi * scipy_bessel.kn(0, a*transformer.kr)
+			actual_ht = transformer.qdht(f)
+			// These tolerances are pretty loose, but there seems to be large
+			// error here
+			assertInDeltaVec(expected_ht, actual_ht, 0.01)
+			err = meanAbsError(expected_ht, actual_ht)
+			assert.Less(t, err, 4e-3)
+		})
+	}
+
+}
+*/
+func sinc(x float64) float64 {
+	return math.Sin(x) / x
+}
+
+func TestSinc(t *testing.T) {
+	/*Tests from figure 1 of
+	  *"Computation of quasi-discrete Hankel transforms of the integer
+	  order for propagating optical wave fields"*
+	  Manuel Guizar-Sicairos and Julio C. Guitierrez-Vega
+	  J. Opt. Soc. Am. A **21** (1) 53-58 (2004)
+	*/
+	for _, p := range []int{1, 4} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			transformer := NewTransform(p, 3, 256)
+			v := transformer.v
+			gamma := 5.
+			fun := mat.NewVecDense(v.Len(), nil)
+			ApplyVec(func(r float64) float64 { return sinc(2.0 * pi * gamma * r) }, fun, &transformer.r)
+			expected_ht := mat.NewVecDense(fun.Len(), nil)
+
+			ApplyVec(func(v_ float64) float64 {
+				pf := float64(p)
+				if v_ < gamma {
+					return (math.Pow(v_, pf) * math.Cos(pf*pi/2) /
+						(2 * pi * gamma * math.Sqrt(math.Pow(gamma, 2)-math.Pow(v_, 2)) *
+							math.Pow(gamma+math.Sqrt(math.Pow(gamma, 2)-math.Pow(v_, 2)), pf)))
+				} else {
+					return (math.Sin(pf*math.Asin(gamma/v_)) /
+						(2 * pi * gamma * math.Sqrt(math.Pow(v_, 2)-math.Pow(gamma, 2))))
+				}
+			}, expected_ht, &v)
+			ht := transformer.QDHT(fun)
+			maxHT := slices.Max(ht.(*mat.VecDense).RawVector().Data)
+			for i := 0; i < expected_ht.Len(); i++ {
+				// use the same error measure as the paper
+				dynamical_error := 20 * math.Log10(math.Abs(expected_ht.AtVec(i)-ht.AtVec(i))/maxHT)
+
+				threshold := -10.
+				if v.AtVec(i) > gamma*1.25 || v.AtVec(i) < gamma*0.75 {
+					// threshold is lower for areas not close to gamma
+					threshold = -35
+				}
+				assert.Less(t, dynamical_error, threshold)
+
+			}
+		})
+	}
+}
+
+// ------------------------
+// End Known Transfom pairs
+// ------------------------
 
 // Internal test of generalised jinc func
 func TestGeneralisedJincZero(t *testing.T) {
@@ -237,8 +391,8 @@ def test_round_trip_3d(two_d_size: int, axis: int, radius: np.ndarray, transform
 def test_round_trip_with_interpolation(shape: Callable,
                                        radius: np.ndarray,
                                        transformer: HankelTransform):
-    # the function must be smoothish for interpolation
-    # to work. Random every point doesn't work
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
     func = shape(radius)
     func_hr = transformer.to_transform_r(func)
     ht = transformer.qdht(func_hr)
@@ -258,13 +412,13 @@ def test_original_r_k_grid():
         _ = transformer.original_k_grid
 
     transformer = HankelTransform(order=0, radial_grid=r_1d)
-    # no error
+    // no error
     _ = transformer.original_radial_grid
     with pytest.raises(ValueError):
         _ = transformer.original_k_grid
 
     transformer = HankelTransform(order=0, k_grid=k_1d)
-    # no error
+    // no error
     _ = transformer.original_k_grid
     with pytest.raises(ValueError):
         _ = transformer.original_radial_grid
@@ -276,29 +430,29 @@ def test_initialisation_errors():
     r_2d = np.repeat(r_1d[:, np.newaxis], repeats=5, axis=1)
     k_2d = r_2d.copy()
     with pytest.raises(ValueError):
-        # missing any radius or k info
+        // missing any radius or k info
         HankelTransform(order=0)
     with pytest.raises(ValueError):
-        # missing n_points
+        // missing n_points
         HankelTransform(order=0, max_radius=1)
     with pytest.raises(ValueError):
-        # missing max_radius
+        // missing max_radius
         HankelTransform(order=0, n_points=10)
     with pytest.raises(ValueError):
-        # radial_grid and n_points
+        // radial_grid and n_points
         HankelTransform(order=0, radial_grid=r_1d, n_points=10)
     with pytest.raises(ValueError):
-        # radial_grid and max_radius
+        // radial_grid and max_radius
         HankelTransform(order=0, radial_grid=r_1d, max_radius=1)
 
     with pytest.raises(ValueError):
-        # k_grid and n_points
+        // k_grid and n_points
         HankelTransform(order=0, k_grid=k_1d, n_points=10)
     with pytest.raises(ValueError):
-        # k_grid and max_radius
+        // k_grid and max_radius
         HankelTransform(order=0, k_grid=k_1d, max_radius=1)
     with pytest.raises(ValueError):
-        # k_grid and r_grid
+        // k_grid and r_grid
         HankelTransform(order=0, k_grid=k_1d, radial_grid=r_1d)
 
     with pytest.raises(AssertionError):
@@ -306,7 +460,7 @@ def test_initialisation_errors():
     with pytest.raises(AssertionError):
         HankelTransform(order=0, radial_grid=k_2d)
 
-    # no error
+    // no error
     _ = HankelTransform(order=0, max_radius=1, n_points=10)
     _ = HankelTransform(order=0, radial_grid=r_1d)
     _ = HankelTransform(order=0, k_grid=k_1d)
@@ -314,7 +468,7 @@ def test_initialisation_errors():
 
 @pytest.mark.parametrize('n', [10, 100, 512, 1024])
 @pytest.mark.parametrize('max_radius', [0.1, 10, 20, 1e6])
-def test_r_creation_equivalence(n: int, max_radius: float):
+func (t *HankelTestSuit) test_r_creation_equivalence(n int, max_radius, float){
     transformer1 = HankelTransform(order=0, n_points=1024, max_radius=50)
     r = np.linspace(0, 50, 1024)
     transformer2 = HankelTransform(order=0, radial_grid=r)
@@ -334,8 +488,8 @@ def test_r_creation_equivalence(n: int, max_radius: float):
 def test_round_trip_r_interpolation(radius: np.ndarray, order: int, shape: Callable):
     transformer = HankelTransform(order=order, radial_grid=radius)
 
-    # the function must be smoothish for interpolation
-    # to work. Random every point doesn't work
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
     func = shape(radius)
     transform_func = transformer.to_transform_r(func)
     reconstructed_func = transformer.to_original_r(transform_func)
@@ -348,8 +502,8 @@ def test_round_trip_k_interpolation(radius: np.ndarray, order: int, shape: Calla
     k_grid = radius/10
     transformer = HankelTransform(order=order, k_grid=k_grid)
 
-    # the function must be smoothish for interpolation
-    # to work. Random every point doesn't work
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
     func = shape(k_grid)
     transform_func = transformer.to_transform_k(func)
     reconstructed_func = transformer.to_original_k(transform_func)
@@ -362,8 +516,8 @@ def test_round_trip_k_interpolation(radius: np.ndarray, order: int, shape: Calla
 def test_round_trip_r_interpolation_2d(radius: np.ndarray, order: int, shape: Callable, axis: int):
     transformer = HankelTransform(order=order, radial_grid=radius)
 
-    # the function must be smoothish for interpolation
-    # to work. Random every point doesn't work
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
     dims_amplitude = np.ones(2, np.int)
     dims_amplitude[1-axis] = 10
     amplitude = np.random.random(dims_amplitude)
@@ -382,8 +536,8 @@ def test_round_trip_k_interpolation_2d(radius: np.ndarray, order: int, shape: Ca
     k_grid = radius/10
     transformer = HankelTransform(order=order, k_grid=k_grid)
 
-    # the function must be smoothish for interpolation
-    # to work. Random every point doesn't work
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
     dims_amplitude = np.ones(2, np.int)
     dims_amplitude[1-axis] = 10
     amplitude = np.random.random(dims_amplitude)
@@ -414,119 +568,4 @@ def test_jinc2d(transformer: HankelTransform, a: float, axis: int, two_d_size: i
     actual_ht = transformer.qdht(f_array, axis=axis)
     error = np.mean(np.abs(expected_ht_array-actual_ht))
     assert error < 1e-3
-
-
-@pytest.mark.parametrize('a', [2, 5, 10])
-def test_gaussian(a: float, radius: np.ndarray):
-    # Note the definition in Guizar-Sicairos varies by 2*pi in
-    # both scaling of the argument (so use kr rather than v) and
-    # scaling of the magnitude.
-    transformer = HankelTransform(order=0, radial_grid=radius)
-    f = np.exp(-a ** 2 * transformer.r ** 2)
-    expected_ht = 2*np.pi*(1 / (2 * a**2)) * np.exp(-transformer.kr**2 / (4 * a**2))
-    actual_ht = transformer.qdht(f)
-    assert np.allclose(expected_ht, actual_ht)
-
-
-@pytest.mark.parametrize('a', [2, 5, 10])
-def test_inverse_gaussian(a: float, radius: np.ndarray):
-    # Note the definition in Guizar-Sicairos varies by 2*pi in
-    # both scaling of the argument (so use kr rather than v) and
-    # scaling of the magnitude.
-    transformer = HankelTransform(order=0, radial_grid=radius)
-    ht = 2*np.pi*(1 / (2 * a**2)) * np.exp(-transformer.kr**2 / (4 * a**2))
-    actual_f = transformer.iqdht(ht)
-    expected_f = np.exp(-a ** 2 * transformer.r ** 2)
-    assert np.allclose(expected_f, actual_f)
-
-
-@pytest.mark.parametrize('axis', [0, 1])
-def test_gaussian_2d(axis: int, radius: np.ndarray):
-    # Note the definition in Guizar-Sicairos varies by 2*pi in
-    # both scaling of the argument (so use kr rather than v) and
-    # scaling of the magnitude.
-    transformer = HankelTransform(order=0, radial_grid=radius)
-    a = np.linspace(2, 10)
-    dims_a = np.ones(2, np.int)
-    dims_a[1-axis] = len(a)
-    dims_r = np.ones(2, np.int)
-    dims_r[axis] = len(transformer.r)
-    a_reshaped = np.reshape(a, dims_a)
-    r_reshaped = np.reshape(transformer.r, dims_r)
-    kr_reshaped = np.reshape(transformer.kr, dims_r)
-    f = np.exp(-a_reshaped**2 * r_reshaped**2)
-    expected_ht = 2*np.pi*(1 / (2 * a_reshaped**2)) * np.exp(-kr_reshaped**2 / (4 * a_reshaped**2))
-    actual_ht = transformer.qdht(f, axis=axis)
-    assert np.allclose(expected_ht, actual_ht)
-
-
-@pytest.mark.parametrize('axis', [0, 1])
-def test_inverse_gaussian_2d(axis: int, radius: np.ndarray):
-    # Note the definition in Guizar-Sicairos varies by 2*pi in
-    # both scaling of the argument (so use kr rather than v) and
-    # scaling of the magnitude.
-    transformer = HankelTransform(order=0, radial_grid=radius)
-    a = np.linspace(2, 10)
-    dims_a = np.ones(2, np.int)
-    dims_a[1-axis] = len(a)
-    dims_r = np.ones(2, np.int)
-    dims_r[axis] = len(transformer.r)
-    a_reshaped = np.reshape(a, dims_a)
-    r_reshaped = np.reshape(transformer.r, dims_r)
-    kr_reshaped = np.reshape(transformer.kr, dims_r)
-    ht = 2*np.pi*(1 / (2 * a_reshaped**2)) * np.exp(-kr_reshaped**2 / (4 * a_reshaped**2))
-    actual_f = transformer.iqdht(ht, axis=axis)
-    expected_f = np.exp(-a_reshaped ** 2 * r_reshaped ** 2)
-    assert np.allclose(expected_f, actual_f)
-
-
-@pytest.mark.parametrize('a', [2, 1, 0.1])
-def test_1_over_r2_plus_z2(a: float):
-    # Note the definition in Guizar-Sicairos varies by 2*pi in
-    # both scaling of the argument (so use kr rather than v) and
-    # scaling of the magnitude.
-    transformer = HankelTransform(order=0, n_points=1024, max_radius=50)
-    f = 1 / (transformer.r**2 + a**2)
-    # kn cannot handle complex arguments, so a must be real
-    expected_ht = 2 * np.pi * scipy_bessel.kn(0, a * transformer.kr)
-    actual_ht = transformer.qdht(f)
-    # These tolerances are pretty loose, but there seems to be large
-    # error here
-    assert np.allclose(expected_ht, actual_ht, rtol=0.1, atol=0.01)
-    error = np.mean(np.abs(expected_ht - actual_ht))
-    assert error < 4e-3
-
-
-def sinc(x):
-    return np.sin(x) / x
-
-
-# noinspection DuplicatedCode
-@pytest.mark.parametrize('p', [1, 4])
-def test_sinc(p):
-    """Tests from figure 1 of
-        *"Computation of quasi-discrete Hankel transforms of the integer
-        order for propagating optical wave fields"*
-        Manuel Guizar-Sicairos and Julio C. Guitierrez-Vega
-        J. Opt. Soc. Am. A **21** (1) 53-58 (2004)
-        """
-    transformer = HankelTransform(p, max_radius=3, n_points=256)
-    v = transformer.v
-    gamma = 5
-    func = sinc(2 * np.pi * gamma * transformer.r)
-    expected_ht = np.zeros_like(func)
-
-    expected_ht[v < gamma] = (v[v < gamma]**p * np.cos(p * np.pi / 2)
-                              / (2*np.pi*gamma * np.sqrt(gamma**2 - v[v < gamma]**2)
-                                 * (gamma + np.sqrt(gamma**2 - v[v < gamma]**2))**p))
-    expected_ht[v >= gamma] = (np.sin(p * np.arcsin(gamma/v[v >= gamma]))
-                               / (2*np.pi*gamma * np.sqrt(v[v >= gamma]**2 - gamma**2)))
-    ht = transformer.qdht(func)
-
-    # use the same error measure as the paper
-    dynamical_error = 20 * np.log10(np.abs(expected_ht-ht) / np.max(ht))
-    not_near_gamma = np.logical_or(v > gamma*1.25,
-                                   v < gamma*0.75)
-    assert np.all(dynamical_error < -10)
-    assert np.all(dynamical_error[not_near_gamma] < -35)
 */
