@@ -29,8 +29,14 @@ type HankelTransform struct {
 }
 
 func NewTransform(order int, maxRadius float64, nPoints int) HankelTransform {
-	radialGrid := linspace(0, maxRadius, nPoints)
-	return NewTransformFromRadius(order, radialGrid)
+	h := HankelTransform{}
+	h.nPoints = nPoints
+	h.maxRadius = maxRadius
+	h.order = order
+	h.originalRadialGrid = nil
+	h.originalKGrid = nil
+	h.build()
+	return h
 }
 
 func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
@@ -54,14 +60,16 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	   else:
 	       raise ValueError(usage)  # pragma: no cover - backup case: cannot currently be reached
 	*/
-	nPoints, _ := radialGrid.Dims()
-	maxRadius := mat.Max(radialGrid)
-	// TODO k_grid input
+	h.nPoints, _ = radialGrid.Dims()
+	h.maxRadius = mat.Max(radialGrid)
 	h.order = order
-	h.nPoints = nPoints
 	h.originalRadialGrid = radialGrid
 	h.originalKGrid = nil
+	h.build()
+	return h
+}
 
+func (h *HankelTransform) build() {
 	// Calculate N+1 roots must be calculated before max_radius can be derived from k_grid
 	alpha := besselzeros.BesselZeros(besselzeros.J, h.order, h.nPoints+1, 1e-6)
 	//    alpha = scipy_bessel.jn_zeros(self.order, self.n_points + 1)
@@ -72,8 +80,6 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	//    if k_grid is not None:
 	//        v_max = np.max(k_grid) / (2 * np.pi)
 	//        max_radius = self.alpha_n1 / (2 * np.pi * v_max)
-
-	h.maxRadius = maxRadius
 
 	// Calculate co-ordinate vectors
 	h.r = *mat.NewVecDense(h.nPoints, nil)
@@ -93,10 +99,10 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	// self.JV = jp1 / self.v_max
 	jp := mat.NewDense(h.nPoints, h.nPoints, nil)
 	jp.Outer(1/h.S, h.alpha, h.alpha)
-	jp.Apply(func(i, j int, v float64) float64 { return math.Jn(order, v) }, jp)
+	jp.Apply(func(i, j int, v float64) float64 { return math.Jn(h.order, v) }, jp)
 
 	jp1 := mat.NewVecDense(h.nPoints, nil)
-	ApplyVec(func(v float64) float64 { return math.Abs(math.Jn(order+1, v)) }, jp1, h.alpha)
+	ApplyVec(func(v float64) float64 { return math.Abs(math.Jn(h.order+1, v)) }, jp1, h.alpha)
 	jp1Mat := mat.NewDense(h.nPoints, h.nPoints, nil)
 	jp1Mat.Outer(h.S, jp1, jp1)
 	h.T = *mat.NewDense(h.nPoints, h.nPoints, nil)
@@ -106,7 +112,6 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	h.JR.ScaleVec(1/h.maxRadius, jp1)
 	h.JV = *mat.NewVecDense(h.nPoints, nil)
 	h.JV.ScaleVec(1/h.vMax, jp1)
-	return h
 }
 
 func (h *HankelTransform) QDHT(fr mat.Vector) mat.Vector {
@@ -140,9 +145,6 @@ func (h *HankelTransform) QDHT(fr mat.Vector) mat.Vector {
 	n, _ := fr.Dims()
 	fr_ := mat.NewVecDense(n, nil)
 	fr_.DivElemVec(fr, jr)
-
-	// fvMat := mat.NewDense(h.nPoints, h.nPoints, nil)
-	// fvMat.Mul(&(h.T), fr_)
 
 	fv := mat.NewVecDense(n, nil)
 	fv.MulVec(&(h.T), fr_)
