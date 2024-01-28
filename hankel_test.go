@@ -70,6 +70,8 @@ def test_energy_conservation(shape: Callable,
 
 */
 
+const maxOrder int = 4
+
 type RadialSuite struct {
 	suite.Suite
 	radius mat.VecDense
@@ -376,7 +378,6 @@ func generalisedJinc(v mat.Vector, a float64, p int) *mat.VecDense {
 // -------------
 
 func TestSuite(t *testing.T) {
-	maxOrder := 4
 	for order := 0; order <= maxOrder; order++ {
 		hs := new(HankelTestSuite)
 		hs.order = order

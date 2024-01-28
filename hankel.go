@@ -3,6 +3,7 @@ package gohank
 import (
 	"math"
 
+	"github.com/etfrogers/gohank/internal/besselzeros"
 	"gonum.org/v1/gonum/mat"
 )
 
@@ -62,7 +63,7 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	h.originalKGrid = nil
 
 	// Calculate N+1 roots must be calculated before max_radius can be derived from k_grid
-	alpha := besselZeros(J, h.order, h.nPoints+1, 1e-6)
+	alpha := besselzeros.BesselZeros(besselzeros.J, h.order, h.nPoints+1, 1e-6)
 	//    alpha = scipy_bessel.jn_zeros(self.order, self.n_points + 1)
 
 	h.alpha_n1 = alpha[h.nPoints]

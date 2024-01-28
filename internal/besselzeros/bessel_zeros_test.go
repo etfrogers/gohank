@@ -1,4 +1,4 @@
-package gohank
+package besselzeros_test
 
 import (
 	"encoding/csv"
@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/etfrogers/gohank/internal/besselzeros"
 )
 
 const J_ZEROS string = `#
@@ -103,12 +105,12 @@ func init() {
 }
 
 func TestAgainstHardCodedZeros(t *testing.T) {
-	for funType := 0; funType <= int(YP); funType++ {
+	for funType := 0; funType <= int(besselzeros.YP); funType++ {
 		these_zeros := all_zeros[funType]
 		for order := range these_zeros {
 			t.Run(fmt.Sprint(order), func(t *testing.T) {
 				expected := these_zeros[order]
-				actual := besselZeros(BesselFunType(funType), order, len(expected), 1e-6)
+				actual := besselzeros.BesselZeros(besselzeros.BesselFunType(funType), order, len(expected), 1e-6)
 				assert.InDeltaSlice(t, expected, actual, 1e-4)
 			})
 		}
@@ -118,7 +120,7 @@ func TestAgainstHardCodedZeros(t *testing.T) {
 func TestEvaluationAtZeroJ(t *testing.T) {
 	for order := 0; order < 20; order++ {
 		t.Run(fmt.Sprint(order), func(t *testing.T) {
-			zeros := besselZeros(J, order, 100, 1e-6)
+			zeros := besselzeros.BesselZeros(besselzeros.J, order, 100, 1e-6)
 			for _, v := range zeros {
 				assert.InDelta(t, 0, math.Jn(order, v), 1e-6)
 			}
@@ -129,7 +131,7 @@ func TestEvaluationAtZeroJ(t *testing.T) {
 func TestEvaluationAtZeroY(t *testing.T) {
 	for order := 0; order < 20; order++ {
 		t.Run(fmt.Sprint(order), func(t *testing.T) {
-			zeros := besselZeros(Y, order, 100, 1e-6)
+			zeros := besselzeros.BesselZeros(besselzeros.Y, order, 100, 1e-6)
 			for _, v := range zeros {
 				assert.InDelta(t, 0, math.Yn(order, v), 1e-6)
 			}

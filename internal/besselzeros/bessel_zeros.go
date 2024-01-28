@@ -1,8 +1,10 @@
-package gohank
+package besselzeros
 
 import (
 	"math"
 )
+
+const pi = math.Pi
 
 type BesselFunType int
 
@@ -17,7 +19,7 @@ func (t BesselFunType) isNonDerivative() bool {
 	return t == J || t == Y
 }
 
-func besselZeros(funcType BesselFunType, order int, nZeros int, precision float64) (z []float64) {
+func BesselZeros(funcType BesselFunType, order int, nZeros int, precision float64) (z []float64) {
 	//BESSEL_ZEROS: Finds the first n zeros of a bessel function
 	//
 	//	z = bessel_zeros(d, a, n, e)
