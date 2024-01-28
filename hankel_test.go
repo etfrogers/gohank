@@ -70,9 +70,13 @@ def test_energy_conservation(shape: Callable,
 
 */
 
-type HankelTestSuite struct {
+type RadialSuite struct {
 	suite.Suite
-	radius      mat.VecDense
+	radius mat.VecDense
+}
+
+type HankelTestSuite struct {
+	RadialSuite
 	transformer HankelTransform
 	order       int
 }
@@ -80,6 +84,10 @@ type HankelTestSuite struct {
 func (suite *HankelTestSuite) SetupTest() {
 	suite.radius = *linspace(0, 3, 1024)
 	suite.transformer = NewTransformFromRadius(suite.order, &suite.radius)
+}
+
+func (suite *RadialSuite) SetupTest() {
+	suite.radius = *linspace(0, 3, 1024)
 }
 
 func randomVecLike(shape mat.Vector) mat.Vector {
@@ -122,33 +130,32 @@ func (t *HankelTestSuite) TestTopHat() {
 	}
 }
 
-// NO ORDER
-func (t *HankelTestSuite) TestGaussian() {
+func (t *RadialSuite) TestGaussian() {
 	// Note the definition in Guizar-Sicairos varies by 2*pi in
 	// both scaling of the argument (so use kr rather than v) and
 	// scaling of the magnitude.
+	transformer := NewTransformFromRadius(0, &t.radius)
 	for _, a := range []float64{2, 5, 10} {
 		t.Run(fmt.Sprint(a), func() {
-			transformer := NewTransformFromRadius(0, &t.radius)
 			f := mat.NewVecDense(transformer.r.Len(), nil)
 			a2 := math.Pow(a, 2)
 			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, f, &transformer.r)
 			expected_ht := mat.NewVecDense(transformer.r.Len(), nil)
-			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, expected_ht, &transformer.kr)
+			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
+				expected_ht, &transformer.kr)
 			actual_ht := transformer.QDHT(f)
 			assertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9)
 		})
 	}
 }
 
-// NO ORDER
-func (t *HankelTestSuite) TestInverseGaussian() {
+func (t *RadialSuite) TestInverseGaussian() {
 	// Note the definition in Guizar-Sicairos varies by 2*pi in
 	// both scaling of the argument (so use kr rather than v) and
 	// scaling of the magnitude.
+	transformer := NewTransformFromRadius(0, &t.radius)
 	for _, a := range []float64{2, 5, 10} {
 		t.Run(fmt.Sprint(a), func() {
-			transformer := NewTransformFromRadius(0, &t.radius)
 			ht := mat.NewVecDense(transformer.r.Len(), nil)
 			a2 := math.Pow(a, 2)
 			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, ht, &transformer.kr)
@@ -199,29 +206,33 @@ func (t *HankelTestSuite) TestInverseGaussian() {
 //     actual_f = transformer.iqdht(ht, axis=axis)
 //     expected_f = np.exp(-a_reshaped ** 2 * r_reshaped ** 2)
 //     assert np.allclose(expected_f, actual_f)
-/*
-// NO ORDER
-func (t *HankelTestSuite) test_1_over_r2_plus_z2(a float64) {
+
+func (t *RadialSuite) Test1OverR2plusZ2() {
 	// Note the definition in Guizar-Sicairos varies by 2*pi in
 	// both scaling of the argument (so use kr rather than v) and
 	// scaling of the magnitude.
+	t.T().Skip("skipping as it requires a modifed bessel function of the second kind")
+	transformer := NewTransform(0, 50, 1024)
 	for _, a := range []float64{2, 5, 10} {
 		t.Run(fmt.Sprint(a), func() {
-			transformer = NewTransform(0, 1024, 50)
-			f = 1 / (transformer.r**2 + a**2)
+			f := mat.NewVecDense(t.radius.Len(), nil)
+			ApplyVec(func(r float64) float64 { return 1 / (math.Pow(r, 2) + math.Pow(a, 2)) }, f, &t.radius)
+			// f = 1 / (transformer.r**2 + a**2)
 			// kn cannot handle complex arguments, so a must be real
-			expected_ht = 2 * np.pi * scipy_bessel.kn(0, a*transformer.kr)
-			actual_ht = transformer.qdht(f)
+			expected_ht := mat.NewVecDense(t.radius.Len(), nil)
+			ApplyVec(func(k float64) float64 { return 2 * pi * math.Y0(a*k) }, expected_ht, &t.radius)
+			//2 * np.pi * scipy_bessel.kn(0, a*transformer.kr)
+			actual_ht := transformer.QDHT(f)
 			// These tolerances are pretty loose, but there seems to be large
 			// error here
-			assertInDeltaVec(expected_ht, actual_ht, 0.01)
-			err = meanAbsError(expected_ht, actual_ht)
-			assert.Less(t, err, 4e-3)
+			assertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01)
+			err := meanAbsError(expected_ht, actual_ht)
+			assert.Less(t.T(), err, 4e-3)
 		})
 	}
 
 }
-*/
+
 func sinc(x float64) float64 {
 	return math.Sin(x) / x
 }
@@ -297,6 +308,9 @@ func TestGeneralisedJincZero(t *testing.T) {
 	}
 }
 
+// ----------------
+// HELPER FUNCTIONS
+// ----------------
 func meanAbsError(v1, v2 mat.Vector) float64 {
 	if v1.Len() != v2.Len() {
 		panic("vector sizes mismatched")
@@ -317,15 +331,9 @@ func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float
 	}
 }
 
-func TestSuite(t *testing.T) {
-	maxOrder := 4
-	for order := 0; order <= maxOrder; order++ {
-		hs := new(HankelTestSuite)
-		hs.order = order
-		suite.Run(t, hs)
-	}
-}
-
+// ---------------
+// MATHS FUNCTIONS
+// ----------------
 func generalisedTopHat(r mat.Vector, a float64, p int) *mat.VecDense {
 	topHat := mat.NewVecDense(r.Len(), nil)
 	for i := 0; i < r.Len(); i++ {
@@ -361,6 +369,24 @@ func generalisedJinc(v mat.Vector, a float64, p int) *mat.VecDense {
 		}
 	}
 	return val
+}
+
+// -------------
+// SUITE RUNNERS
+// -------------
+
+func TestSuite(t *testing.T) {
+	maxOrder := 4
+	for order := 0; order <= maxOrder; order++ {
+		hs := new(HankelTestSuite)
+		hs.order = order
+		suite.Run(t, hs)
+	}
+}
+
+func TestRadialSuite(t *testing.T) {
+	s := new(RadialSuite)
+	suite.Run(t, s)
 }
 
 /*
