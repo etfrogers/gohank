@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/etfrogers/gohank/internal/besselzeros"
+	"gonum.org/v1/gonum/interp"
 	"gonum.org/v1/gonum/mat"
 )
 
@@ -69,6 +70,17 @@ func NewTransformFromRadius(order int, radialGrid mat.Vector) HankelTransform {
 	return h
 }
 
+func NewTransformFromKGrid(order int, kGrid mat.Vector) HankelTransform {
+	h := HankelTransform{}
+	h.nPoints, _ = kGrid.Dims()
+	h.maxRadius = -1
+	h.order = order
+	h.originalRadialGrid = nil
+	h.originalKGrid = kGrid
+	h.build()
+	return h
+}
+
 func (h *HankelTransform) build() {
 	// Calculate N+1 roots must be calculated before max_radius can be derived from k_grid
 	alpha := besselzeros.BesselZeros(besselzeros.J, h.order, h.nPoints+1, 1e-6)
@@ -77,10 +89,10 @@ func (h *HankelTransform) build() {
 	h.alpha_n1 = alpha[h.nPoints]
 	h.alpha = mat.NewVecDense(h.nPoints, alpha[0:h.nPoints])
 
-	//    if k_grid is not None:
-	//        v_max = np.max(k_grid) / (2 * np.pi)
-	//        max_radius = self.alpha_n1 / (2 * np.pi * v_max)
-
+	if h.maxRadius < 0 {
+		vMax := mat.Max(h.originalKGrid) / (2 * pi)
+		h.maxRadius = h.alpha_n1 / (2 * pi * vMax)
+	}
 	// Calculate co-ordinate vectors
 	h.r = *mat.NewVecDense(h.nPoints, nil)
 	h.r.ScaleVec(h.maxRadius/h.alpha_n1, h.alpha)
@@ -217,6 +229,145 @@ func (t *HankelTransform) getScalingFactors(f mat.Vector) (jr, jv mat.Vector) {
 	return jr, jv
 }
 
+func (t *HankelTransform) Order() int {
+	return t.order
+}
+
+func (t *HankelTransform) MaxRadius() float64 {
+	return t.maxRadius
+}
+
+func (t *HankelTransform) NPoints() int {
+	return t.nPoints
+}
+
+func (t *HankelTransform) OriginalRadialGrid() mat.Vector {
+	/* Return the original radial grid used to construct the object, or raise a :class:`ValueError`
+	   if the constructor was not called specifying a ``radial_grid`` parameter.
+
+	   :return: The original radial grid used to construct the object.
+	   :rtype: :class:`numpy.ndarray`
+	*/
+	if t.originalRadialGrid == nil {
+		panic("attempted to access original_radial_grid on HankelTransform " +
+			"object that was not constructed with a radial_grid")
+	}
+	return t.originalRadialGrid
+}
+
+func (t *HankelTransform) OriginalKGrid() mat.Vector {
+	/* Return the original k grid used to construct the object, or raise a :class:`ValueError`
+	   if the constructor was not called specifying a ``k_grid`` parameter.
+
+	   :return: The original k grid used to construct the object.
+	   :rtype: :class:`numpy.ndarray`
+	*/
+	if t.originalKGrid == nil {
+		panic("Attempted to access original_k_grid on HankelTransform " +
+			"object that was not constructed with a k_grid")
+	}
+	return t.originalKGrid
+}
+
+func (t *HankelTransform) ToTransformR(function mat.Vector) mat.Vector {
+	/*Interpolate a function, assumed to have been given at the original radial
+	  grid points used to construct the ``HankelTransform`` object onto the grid required
+	  of use in the QDHT algorithm.
+
+	  If the the ``HankelTransform`` object was constructed with a (say) equally-spaced
+	  grid in radius, then it needs the function to transform to be sampled at a specific
+	  grid before it can be passed to :meth:`.HankelTransform.qdht`. This method provides
+	  a convenient way of doing this.
+
+	  :parameter function: The function to be interpolated. Specified at the radial points
+	      :attr:`~.HankelTransform.original_radial_grid`.
+	  :type function: :class:`numpy.ndarray`
+	  :parameter axis: Axis representing the radial dependence of `function`.
+	  :type axis: :class:`int`
+
+	  :return: Interpolated function suitable to passing to
+	      :meth:`HankelTransform.qdht` (sampled at ``self.r``)
+	  :rtype: :class:`numpy.ndarray`
+	*/
+	// if function.ndim == 1 {
+	// axis = 0
+	// }
+	return spline(t.originalRadialGrid, function, &t.r)
+}
+
+func (t *HankelTransform) ToOriginalR(function mat.Vector) mat.Vector {
+	/*Interpolate a function, assumed to have been given at the Hankel transform points
+	  ``self.r`` (as returned by :meth:`HankelTransform.iqdht`) back onto the original grid
+	  used to construct the ``HankelTransform`` object.
+
+	  If the the ``HankelTransform`` object was constructed with a (say) equally-spaced
+	  grid in radius, it may be useful to convert back to this grid after a IQDHT.
+	  This method provides a convenient way of doing this.
+
+	  :parameter function: The function to be interpolated. Specified at the radial points
+	      ``self.r``.
+	  :type function: :class:`numpy.ndarray`
+	  :parameter axis: Axis representing the radial dependence of `function`.
+	  :type axis: :class:`int`
+
+	  :return: Interpolated function at the points held in :attr:`~.HankelTransform.original_radial_grid`.
+	  :rtype: :class:`numpy.ndarray`
+	*/
+	// if function.ndim == 1 {
+	// axis = 0
+	// }
+	return spline(&t.r, function, t.originalRadialGrid)
+}
+func (t *HankelTransform) ToTransformK(function mat.Vector) mat.Vector {
+	/*Interpolate a function, assumed to have been given at the original k
+	  grid points used to construct the ``HankelTransform`` object onto the grid required
+	  of use in the IQDHT algorithm.
+
+	  If the the ``HankelTransform`` object was constructed with a (say) equally-spaced
+	  grid in :math:`k`, then it needs the function to transform to be sampled at a specific
+	  grid before it can be passed to :meth:`.HankelTransform.iqdht`. This method provides
+	  a convenient way of doing this.
+
+	  :parameter function: The function to be interpolated. Specified at the k points
+	      :attr:`~.HankelTransform.original_k_grid`.
+	  :type function: :class:`numpy.ndarray`
+	  :parameter axis: Axis representing the frequency dependence of `function`.
+	  :type axis: :class:`int`
+
+	  :return: Interpolated function suitable to passing to
+	      :meth:`HankelTransform.qdht` (sampled at ``self.kr``)
+	  :rtype: :class:`numpy.ndarray`
+	*/
+	// if function.ndim == 1 {
+	// axis = 0
+	// }
+	return spline(t.originalKGrid, function, &t.kr)
+}
+
+func (t *HankelTransform) ToOriginalK(function mat.Vector) mat.Vector {
+	/*nterpolate a function, assumed to have been given at the Hankel transform points
+	  ``self.k`` (as returned by :meth:`HankelTransform.qdht`) back onto the original grid
+	  used to construct the ``HankelTransform`` object.
+
+	  If the the ``HankelTransform`` object was constructed with a (say) equally-spaced
+	  grid in :math:`k`, it may be useful to convert back to this grid after a QDHT.
+	  This method provides a convenient way of doing this.
+
+	  :parameter function: The function to be interpolated. Specified at the radial points
+	      ``self.k``.
+	  :type function: :class:`numpy.ndarray`
+	  :parameter axis: Axis representing the frequency dependence of `function`.
+	  :type axis: :class:`int`
+
+	  :return: Interpolated function at the points held in :attr:`~.HankelTransform.original_k_grid`.
+	  :rtype: :class:`numpy.ndarray`
+	*/
+	// if function.ndim == 1 {
+	// axis = 0
+	// }
+	return spline(&t.kr, function, t.originalKGrid)
+}
+
 // -------------------
 // NON CLASS FUNCTIONS
 // -------------------
@@ -229,13 +380,24 @@ func linspace(start, stop float64, N int) *mat.VecDense {
 	return v
 }
 
-func ApplyVec(fn func(float64) float64, dest *mat.VecDense, src mat.Vector) {
+func ApplyVec(fn func(float64) float64, dest mat.MutableVector, src mat.Vector) mat.MutableVector {
+	if dest == nil {
+		dest = mat.NewVecDense(src.Len(), nil)
+	}
 	if dest.Len() != src.Len() {
 		panic("input vectors must be the same length")
 	}
 	for i := 0; i < src.Len(); i++ {
 		dest.SetVec(i, fn(src.AtVec(i)))
 	}
+	return dest
+}
+
+func spline(x0 mat.Vector, y0 mat.Vector, x mat.Vector) mat.Vector {
+	// f = interpolate.interp1d(x0, y0, axis=axis, fill_value='extrapolate', kind='cubic')
+	var predictor interp.AkimaSpline
+	predictor.Fit(x0.(*mat.VecDense).RawVector().Data, y0.(*mat.VecDense).RawVector().Data)
+	return ApplyVec(func(x float64) float64 { return predictor.Predict(x) }, nil, x)
 }
 
 /*

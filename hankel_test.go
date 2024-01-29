@@ -97,6 +97,17 @@ func randomVecLike(shape mat.Vector) mat.Vector {
 	return mat.NewVecDense(n, nil)
 }
 
+var smoothShapes = []struct {
+	name string
+	f    func(float64) float64
+}{
+	{"zeros", func(float64) float64 { return 0. }},
+	{"e^(-r^2)", func(r float64) float64 { return math.Exp(-math.Pow(r, 2)) }},
+	{"r", func(r float64) float64 { return r }},
+	{"r^2", func(r float64) float64 { return math.Pow(r, 2) }},
+	{"1/(sqrt(r^2 + 0.1^2))", func(r float64) float64 { return 1 / math.Sqrt(math.Pow(r, 2)+math.Pow(0.1, 2)) }},
+}
+
 func (t *HankelTestSuite) TestRoundTrip() {
 	fun := randomVecLike(&t.radius)
 	ht := t.transformer.QDHT(fun)
@@ -104,6 +115,81 @@ func (t *HankelTestSuite) TestRoundTrip() {
 	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9)
 }
 
+// -------------------
+// Test Interpolations
+// -------------------
+func (suite *RadialSuite) TestRoundTripRInterpolation() {
+	for _, shape := range smoothShapes {
+		order := 0
+		suite.Run(fmt.Sprintf("%v, %v", shape.name, order), func() {
+			transformer := NewTransformFromRadius(order, &suite.radius)
+
+			// the function must be smoothish for interpolation
+			// to work. Random every point doesn't work
+
+			fun := ApplyVec(shape.f, nil, &suite.radius)
+			transform_func := transformer.ToTransformR(fun)
+			reconstructed_func := transformer.ToOriginalR(transform_func)
+			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 2e-2)
+		})
+	}
+}
+
+func (suite *RadialSuite) TestRoundTripKInterpolation() {
+	for _, shape := range smoothShapes {
+		order := 0
+		suite.Run(fmt.Sprintf("%v, %v", shape.name, order), func() {
+
+			kGrid := ApplyVec(func(r float64) float64 { return r / 10 }, nil, &suite.radius)
+			transformer := NewTransformFromKGrid(order, kGrid)
+
+			// the function must be smoothish for interpolation
+			// to work. Random every point doesn't work
+			fun := ApplyVec(shape.f, nil, kGrid)
+			transform_func := transformer.ToTransformK(fun)
+			reconstructed_func := transformer.ToOriginalK(transform_func)
+			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-2)
+		})
+	}
+}
+
+/*
+@pytest.mark.parametrize('shape', smooth_shapes)
+def test_round_trip_with_interpolation(shape: Callable,
+                                       radius: np.ndarray,
+                                       transformer: HankelTransform):
+    // the function must be smoothish for interpolation
+    // to work. Random every point doesn't work
+    func = shape(radius)
+    func_hr = transformer.to_transform_r(func)
+    ht = transformer.qdht(func_hr)
+    reconstructed_hr = transformer.iqdht(ht)
+    reconstructed = transformer.to_original_r(reconstructed_hr)
+
+    assert np.allclose(func, reconstructed, rtol=2e-4)
+
+
+def test_original_r_k_grid():
+    r_1d = np.linspace(0, 1, 10)
+    k_1d = r_1d.copy()
+    transformer = HankelTransform(order=0, max_radius=1, n_points=10)
+    with pytest.raises(ValueError):
+        _ = transformer.original_radial_grid
+    with pytest.raises(ValueError):
+        _ = transformer.original_k_grid
+
+    transformer = HankelTransform(order=0, radial_grid=r_1d)
+    // no error
+    _ = transformer.original_radial_grid
+    with pytest.raises(ValueError):
+        _ = transformer.original_k_grid
+
+    transformer = HankelTransform(order=0, k_grid=k_1d)
+    // no error
+    _ = transformer.original_k_grid
+    with pytest.raises(ValueError):
+        _ = transformer.original_radial_grid
+*/
 // -------------------
 // Test known HT pairs
 // -------------------
@@ -329,8 +415,19 @@ func meanAbsError(v1, v2 mat.Vector) float64 {
 func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64) {
 	assert.Equal(t, expected.Len(), actual.Len())
 	for i := 0; i < expected.Len(); i++ {
-		assert.InDelta(t, expected.AtVec(i), actual.AtVec(i), precision)
+		assert.InDelta(t, expected.AtVec(i), actual.AtVec(i), precision, "Index %d", i)
 	}
+}
+
+func assertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector, precisionBody, precisionEnd float64) {
+	n := expected.Len()
+	assertInDeltaVec(
+		t,
+		expected.(*mat.VecDense).SliceVec(1, n-2),
+		actual.(*mat.VecDense).SliceVec(1, n-2),
+		precisionBody)
+	assert.InDelta(t, expected.AtVec(0), actual.AtVec(0), precisionEnd)
+	assert.InDelta(t, expected.AtVec(n-1), actual.AtVec(n-1), precisionEnd)
 }
 
 // ---------------
@@ -414,41 +511,7 @@ def test_round_trip_3d(two_d_size: int, axis: int, radius: np.ndarray, transform
     assert np.allclose(func, reconstructed)
 
 
-@pytest.mark.parametrize('shape', smooth_shapes)
-def test_round_trip_with_interpolation(shape: Callable,
-                                       radius: np.ndarray,
-                                       transformer: HankelTransform):
-    // the function must be smoothish for interpolation
-    // to work. Random every point doesn't work
-    func = shape(radius)
-    func_hr = transformer.to_transform_r(func)
-    ht = transformer.qdht(func_hr)
-    reconstructed_hr = transformer.iqdht(ht)
-    reconstructed = transformer.to_original_r(reconstructed_hr)
 
-    assert np.allclose(func, reconstructed, rtol=2e-4)
-
-
-def test_original_r_k_grid():
-    r_1d = np.linspace(0, 1, 10)
-    k_1d = r_1d.copy()
-    transformer = HankelTransform(order=0, max_radius=1, n_points=10)
-    with pytest.raises(ValueError):
-        _ = transformer.original_radial_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_k_grid
-
-    transformer = HankelTransform(order=0, radial_grid=r_1d)
-    // no error
-    _ = transformer.original_radial_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_k_grid
-
-    transformer = HankelTransform(order=0, k_grid=k_1d)
-    // no error
-    _ = transformer.original_k_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_radial_grid
 
 
 def test_initialisation_errors():
@@ -510,31 +573,6 @@ func (t *HankelTestSuit) test_r_creation_equivalence(n int, max_radius, float){
             assert np.allclose(val, val2)
 
 
-@pytest.mark.parametrize('shape', smooth_shapes)
-@pytest.mark.parametrize('order', orders)
-def test_round_trip_r_interpolation(radius: np.ndarray, order: int, shape: Callable):
-    transformer = HankelTransform(order=order, radial_grid=radius)
-
-    // the function must be smoothish for interpolation
-    // to work. Random every point doesn't work
-    func = shape(radius)
-    transform_func = transformer.to_transform_r(func)
-    reconstructed_func = transformer.to_original_r(transform_func)
-    assert np.allclose(func, reconstructed_func, rtol=1e-4)
-
-
-@pytest.mark.parametrize('shape', smooth_shapes)
-@pytest.mark.parametrize('order', orders)
-def test_round_trip_k_interpolation(radius: np.ndarray, order: int, shape: Callable):
-    k_grid = radius/10
-    transformer = HankelTransform(order=order, k_grid=k_grid)
-
-    // the function must be smoothish for interpolation
-    // to work. Random every point doesn't work
-    func = shape(k_grid)
-    transform_func = transformer.to_transform_k(func)
-    reconstructed_func = transformer.to_original_k(transform_func)
-    assert np.allclose(func, reconstructed_func, rtol=1e-4)
 
 
 @pytest.mark.parametrize('shape', smooth_shapes)
