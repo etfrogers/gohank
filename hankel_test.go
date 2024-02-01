@@ -3,6 +3,7 @@ package gohank
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"slices"
 	"testing"
 
@@ -94,13 +95,19 @@ func (suite *RadialSuite) SetupTest() {
 
 func randomVecLike(shape mat.Vector) mat.Vector {
 	n, _ := shape.Dims()
-	return mat.NewVecDense(n, nil)
+	vec := mat.NewVecDense(n, nil)
+	for i := 0; i < n; i++ {
+		vec.SetVec(i, rand.Float64()*10)
+	}
+	return vec
 }
 
-var smoothShapes = []struct {
+type shape struct {
 	name string
 	f    func(float64) float64
-}{
+}
+
+var smoothShapes = []shape{
 	{"zeros", func(float64) float64 { return 0. }},
 	{"e^(-r^2)", func(r float64) float64 { return math.Exp(-math.Pow(r, 2)) }},
 	{"r", func(r float64) float64 { return r }},
@@ -108,11 +115,13 @@ var smoothShapes = []struct {
 	{"1/(sqrt(r^2 + 0.1^2))", func(r float64) float64 { return 1 / math.Sqrt(math.Pow(r, 2)+math.Pow(0.1, 2)) }},
 }
 
+var all_shapes = append(smoothShapes, shape{"random", func(f float64) float64 { return rand.Float64() * 10 }})
+
 func (t *HankelTestSuite) TestRoundTrip() {
 	fun := randomVecLike(&t.radius)
 	ht := t.transformer.QDHT(fun)
 	reconstructed := t.transformer.IQDHT(ht)
-	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9)
+	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9, false)
 }
 
 // -------------------
@@ -130,7 +139,8 @@ func (suite *RadialSuite) TestRoundTripRInterpolation() {
 			fun := ApplyVec(shape.f, nil, &suite.radius)
 			transform_func := transformer.ToTransformR(fun)
 			reconstructed_func := transformer.ToOriginalR(transform_func)
-			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 2e-2)
+			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			// assertInDeltaVec(suite.T(), fun, reconstructed_func, 1e-4, true)
 		})
 	}
 }
@@ -148,48 +158,48 @@ func (suite *RadialSuite) TestRoundTripKInterpolation() {
 			fun := ApplyVec(shape.f, nil, kGrid)
 			transform_func := transformer.ToTransformK(fun)
 			reconstructed_func := transformer.ToOriginalK(transform_func)
-			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-2)
+			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			// assertInDeltaVec(suite.T(), fun, reconstructed_func, 1e-4, true)
 		})
 	}
 }
 
-/*
-@pytest.mark.parametrize('shape', smooth_shapes)
-def test_round_trip_with_interpolation(shape: Callable,
-                                       radius: np.ndarray,
-                                       transformer: HankelTransform):
-    // the function must be smoothish for interpolation
-    // to work. Random every point doesn't work
-    func = shape(radius)
-    func_hr = transformer.to_transform_r(func)
-    ht = transformer.qdht(func_hr)
-    reconstructed_hr = transformer.iqdht(ht)
-    reconstructed = transformer.to_original_r(reconstructed_hr)
+func (t *HankelTestSuite) TestRoundTripWithInterpolation() {
+	// the function must be smoothish for interpolation
+	// to work. Random every point doesn't work
+	for _, shape := range smoothShapes {
+		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
+			fun := ApplyVec(shape.f, nil, &t.radius)
+			fun_hr := t.transformer.ToTransformR(fun)
+			ht := t.transformer.QDHT(fun_hr)
+			reconstructed_hr := t.transformer.IQDHT(ht)
+			reconstructed := t.transformer.ToOriginalR(reconstructed_hr)
 
-    assert np.allclose(func, reconstructed, rtol=2e-4)
+			assertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, 2e-4, 1e-3, true)
+			// assertInDeltaVec(t.T(), fun, reconstructed, 1e-4, true)
+		})
+	}
+}
 
+func TestOriginalRKGrid(t *testing.T) {
+	r_1d := linspace(0, 1, 10)
+	var k_1d mat.VecDense
+	k_1d.CloneFromVec(r_1d)
+	transformer := NewTransform(0, 1., 10)
+	assert.Panics(t, func() { transformer.OriginalRadialGrid() })
+	assert.Panics(t, func() { transformer.OriginalKGrid() })
 
-def test_original_r_k_grid():
-    r_1d = np.linspace(0, 1, 10)
-    k_1d = r_1d.copy()
-    transformer = HankelTransform(order=0, max_radius=1, n_points=10)
-    with pytest.raises(ValueError):
-        _ = transformer.original_radial_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_k_grid
+	transformer = NewTransformFromRadius(0, r_1d)
+	// no error
+	_ = transformer.OriginalRadialGrid()
+	assert.Panics(t, func() { transformer.OriginalKGrid() })
 
-    transformer = HankelTransform(order=0, radial_grid=r_1d)
-    // no error
-    _ = transformer.original_radial_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_k_grid
+	transformer = NewTransformFromKGrid(0, &k_1d)
+	// no error
+	_ = transformer.OriginalKGrid()
+	assert.Panics(t, func() { transformer.OriginalRadialGrid() })
+}
 
-    transformer = HankelTransform(order=0, k_grid=k_1d)
-    // no error
-    _ = transformer.original_k_grid
-    with pytest.raises(ValueError):
-        _ = transformer.original_radial_grid
-*/
 // -------------------
 // Test known HT pairs
 // -------------------
@@ -232,7 +242,7 @@ func (t *RadialSuite) TestGaussian() {
 			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
 				expected_ht, &transformer.kr)
 			actual_ht := transformer.QDHT(f)
-			assertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9)
+			assertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9, false)
 		})
 	}
 }
@@ -252,7 +262,7 @@ func (t *RadialSuite) TestInverseGaussian() {
 			expected_f := mat.NewVecDense(transformer.r.Len(), nil)
 			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, expected_f, &transformer.r)
 			// expected_f = np.exp(-a * *2 * transformer.r * *2)
-			assertInDeltaVec(t.T(), expected_f, actual_f, 1e-9)
+			assertInDeltaVec(t.T(), expected_f, actual_f, 1e-9, false)
 		})
 	}
 }
@@ -313,7 +323,7 @@ func (t *RadialSuite) Test1OverR2plusZ2() {
 			actual_ht := transformer.QDHT(f)
 			// These tolerances are pretty loose, but there seems to be large
 			// error here
-			assertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01)
+			assertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01, false)
 			err := meanAbsError(expected_ht, actual_ht)
 			assert.Less(t.T(), err, 4e-3)
 		})
@@ -412,22 +422,45 @@ func meanAbsError(v1, v2 mat.Vector) float64 {
 	return sum / float64(length)
 }
 
-func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64) {
+const ATOL_LIMIT = 2e-5
+
+func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64, relativeTol bool) {
 	assert.Equal(t, expected.Len(), actual.Len())
 	for i := 0; i < expected.Len(); i++ {
-		assert.InDelta(t, expected.AtVec(i), actual.AtVec(i), precision, "Index %d", i)
+		tol := precision
+		exp := expected.AtVec(i)
+		if relativeTol {
+			tol = math.Abs(precision * exp)
+			if tol < ATOL_LIMIT {
+				tol = ATOL_LIMIT
+			}
+		}
+		inDeltaRTol(t, exp, actual.AtVec(i), tol, relativeTol, "Index %d", i)
 	}
 }
 
-func assertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector, precisionBody, precisionEnd float64) {
+func inDeltaRTol(t *testing.T, expected, actual, precision float64, relativeTol bool, msgAndArgs ...any) {
+	tol := precision
+	if relativeTol {
+		tol = math.Abs(precision * expected)
+		if tol < ATOL_LIMIT {
+			tol = ATOL_LIMIT
+		}
+	}
+	assert.InDelta(t, expected, actual, tol, msgAndArgs...)
+}
+
+func assertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector,
+	precisionBody, precisionEnd float64, relativeTol bool) {
+
 	n := expected.Len()
 	assertInDeltaVec(
 		t,
 		expected.(*mat.VecDense).SliceVec(1, n-2),
 		actual.(*mat.VecDense).SliceVec(1, n-2),
-		precisionBody)
-	assert.InDelta(t, expected.AtVec(0), actual.AtVec(0), precisionEnd)
-	assert.InDelta(t, expected.AtVec(n-1), actual.AtVec(n-1), precisionEnd)
+		precisionBody, relativeTol)
+	inDeltaRTol(t, expected.AtVec(0), actual.AtVec(0), precisionEnd, relativeTol)
+	inDeltaRTol(t, expected.AtVec(n-1), actual.AtVec(n-1), precisionEnd, relativeTol)
 }
 
 // ---------------
