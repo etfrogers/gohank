@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 
+	utils "github.com/etfrogers/gohank/internal"
+	"github.com/etfrogers/gohank/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"gonum.org/v1/gonum/integrate"
@@ -26,13 +28,30 @@ type HankelTestSuite struct {
 	order       int
 }
 
+// -------------
+// SUITE RUNNERS
+// -------------
+
+func TestSuite(t *testing.T) {
+	for order := 0; order <= maxOrder; order++ {
+		hs := new(HankelTestSuite)
+		hs.order = order
+		suite.Run(t, hs)
+	}
+}
+
+func TestRadialSuite(t *testing.T) {
+	s := new(RadialSuite)
+	suite.Run(t, s)
+}
+
 func (suite *HankelTestSuite) SetupTest() {
-	suite.radius = *linspace(0, 3, 1024)
+	suite.radius = *utils.Linspace(0, 3, 1024)
 	suite.transformer = NewTransformFromRadius(suite.order, &suite.radius)
 }
 
 func (suite *RadialSuite) SetupTest() {
-	suite.radius = *linspace(0, 3, 1024)
+	suite.radius = *utils.Linspace(0, 3, 1024)
 }
 
 func randomVecLike(shape mat.Vector) mat.Vector {
@@ -63,7 +82,7 @@ func (t *HankelTestSuite) TestRoundTrip() {
 	fun := randomVecLike(&t.radius)
 	ht := t.transformer.QDHT(fun)
 	reconstructed := t.transformer.IQDHT(ht)
-	assertInDeltaVec(t.T(), fun, reconstructed, 1e-9, false)
+	testutils.AssertInDeltaVec(t.T(), fun, reconstructed, 1e-9, false)
 }
 
 // -------------------
@@ -78,10 +97,10 @@ func (suite *RadialSuite) TestRoundTripRInterpolation() {
 			// the function must be smoothish for interpolation
 			// to work. Random every point doesn't work
 
-			fun := ApplyVec(shape.f, nil, &suite.radius)
+			fun := utils.ApplyVec(shape.f, nil, &suite.radius)
 			transform_func := transformer.ToTransformR(fun)
 			reconstructed_func := transformer.ToOriginalR(transform_func)
-			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			testutils.AssertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
 		})
 	}
 }
@@ -91,15 +110,15 @@ func (suite *RadialSuite) TestRoundTripKInterpolation() {
 		order := 0
 		suite.Run(fmt.Sprintf("%v, %v", shape.name, order), func() {
 
-			kGrid := ApplyVec(func(r float64) float64 { return r / 10 }, nil, &suite.radius)
+			kGrid := utils.ApplyVec(func(r float64) float64 { return r / 10 }, nil, &suite.radius)
 			transformer := NewTransformFromKGrid(order, kGrid)
 
 			// the function must be smoothish for interpolation
 			// to work. Random every point doesn't work
-			fun := ApplyVec(shape.f, nil, kGrid)
+			fun := utils.ApplyVec(shape.f, nil, kGrid)
 			transform_func := transformer.ToTransformK(fun)
 			reconstructed_func := transformer.ToOriginalK(transform_func)
-			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			testutils.AssertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
 		})
 	}
 }
@@ -109,7 +128,7 @@ func (t *HankelTestSuite) TestRoundTripWithInterpolation() {
 	// to work. Random every point doesn't work
 	for _, shape := range smoothShapes {
 		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
-			fun := ApplyVec(shape.f, nil, &t.radius)
+			fun := utils.ApplyVec(shape.f, nil, &t.radius)
 			fun_hr := t.transformer.ToTransformR(fun)
 			ht := t.transformer.QDHT(fun_hr)
 			reconstructed_hr := t.transformer.IQDHT(ht)
@@ -123,13 +142,13 @@ func (t *HankelTestSuite) TestRoundTripWithInterpolation() {
 			if shape.name == "r^2" {
 				useRelTol = false
 			}
-			assertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, 2e-4, endTol, useRelTol)
+			testutils.AssertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, 2e-4, endTol, useRelTol)
 		})
 	}
 }
 
 func TestOriginalRKGrid(t *testing.T) {
-	r_1d := linspace(0, 1, 10)
+	r_1d := utils.Linspace(0, 1, 10)
 	var k_1d mat.VecDense
 	k_1d.CloneFromVec(r_1d)
 	transformer := NewTransform(0, 1., 10)
@@ -157,12 +176,12 @@ func (t *HankelTestSuite) TestParsevalsTheorem() {
 	// ht = transformer.T @ func
 	for _, shape := range all_shapes {
 		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
-			fun := ApplyVec(shape.f, nil, &t.radius)
-			intensityBefore := ApplyVec(intensity, nil, fun)
+			fun := utils.ApplyVec(shape.f, nil, &t.radius)
+			intensityBefore := utils.ApplyVec(intensity, nil, fun)
 			energyBefore := mat.Sum(intensityBefore)
 			ht := mat.NewVecDense(fun.Len(), nil)
 			ht.MulVec(&t.transformer.T, fun)
-			intensityAfter := ApplyVec(intensity, nil, ht)
+			intensityAfter := utils.ApplyVec(intensity, nil, ht)
 			energyAfter := mat.Sum(intensityAfter)
 			assert.InDelta(t.T(), energyBefore, energyAfter, 1e-8)
 		})
@@ -177,8 +196,8 @@ func (t *HankelTestSuite) TestEnergyConservation() {
 	shapes := []struct {
 		name string
 		f    func(mat.Vector, float64, int) mat.Vector
-	}{{"Jinc", generalisedJinc},
-		{"Top Hat", generalisedTopHat}}
+	}{{"Jinc", testutils.GeneralisedJinc},
+		{"Top Hat", testutils.GeneralisedTopHat}}
 
 	integrateOverR := func(r, y *mat.VecDense) float64 {
 		integrand := mat.NewVecDense(y.Len(), nil)
@@ -192,11 +211,11 @@ func (t *HankelTestSuite) TestEnergyConservation() {
 		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
 			transformer := NewTransform(t.transformer.Order(), 10, t.transformer.NPoints())
 			fun := shape.f(&transformer.r, 0.5, transformer.Order())
-			intensityBefore := ApplyVec(intensity, nil, fun).(*mat.VecDense)
+			intensityBefore := utils.ApplyVec(intensity, nil, fun).(*mat.VecDense)
 			energyBefore := integrateOverR(&transformer.r, intensityBefore)
 
 			ht := transformer.QDHT(fun)
-			intensityAfter := ApplyVec(intensity, nil, ht).(*mat.VecDense)
+			intensityAfter := utils.ApplyVec(intensity, nil, ht).(*mat.VecDense)
 			energyAfter := integrateOverR(&transformer.v, intensityAfter)
 
 			assert.InDelta(t.T(), energyBefore, energyAfter, 0.006)
@@ -211,10 +230,10 @@ func (t *HankelTestSuite) TestEnergyConservation() {
 func (t *HankelTestSuite) TestJinc() {
 	for _, a := range []float64{1, 0.7, 0.1} {
 		t.Run(fmt.Sprint(a), func() {
-			f := generalisedJinc(&t.transformer.r, a, t.order)
-			expected_ht := generalisedTopHat(&t.transformer.v, a, t.order)
+			f := testutils.GeneralisedJinc(&t.transformer.r, a, t.order)
+			expected_ht := testutils.GeneralisedTopHat(&t.transformer.v, a, t.order)
 			actual_ht := t.transformer.QDHT(f)
-			err := meanAbsError(expected_ht, actual_ht)
+			err := testutils.MeanAbsError(expected_ht, actual_ht)
 			assert.Less(t.T(), err, 1e-3)
 		})
 	}
@@ -223,10 +242,10 @@ func (t *HankelTestSuite) TestJinc() {
 func (t *HankelTestSuite) TestTopHat() {
 	for _, a := range []float64{1, 1.5, 0.1} {
 		t.Run(fmt.Sprint(a), func() {
-			f := generalisedTopHat(&t.transformer.r, a, t.order)
-			expected_ht := generalisedJinc(&t.transformer.v, a, t.order)
+			f := testutils.GeneralisedTopHat(&t.transformer.r, a, t.order)
+			expected_ht := testutils.GeneralisedJinc(&t.transformer.v, a, t.order)
 			actual_ht := t.transformer.QDHT(f)
-			assert.Less(t.T(), meanAbsError(expected_ht, actual_ht), 1e-3)
+			assert.Less(t.T(), testutils.MeanAbsError(expected_ht, actual_ht), 1e-3)
 		})
 
 	}
@@ -241,12 +260,12 @@ func (t *RadialSuite) TestGaussian() {
 		t.Run(fmt.Sprint(a), func() {
 			f := mat.NewVecDense(transformer.r.Len(), nil)
 			a2 := math.Pow(a, 2)
-			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, f, &transformer.r)
+			utils.ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, f, &transformer.r)
 			expected_ht := mat.NewVecDense(transformer.r.Len(), nil)
-			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
+			utils.ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
 				expected_ht, &transformer.kr)
 			actual_ht := transformer.QDHT(f)
-			assertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9, false)
+			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9, false)
 		})
 	}
 }
@@ -260,13 +279,13 @@ func (t *RadialSuite) TestInverseGaussian() {
 		t.Run(fmt.Sprint(a), func() {
 			ht := mat.NewVecDense(transformer.r.Len(), nil)
 			a2 := math.Pow(a, 2)
-			ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, ht, &transformer.kr)
+			utils.ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, ht, &transformer.kr)
 			// ht = 2 * nppi * (1 / (2 * a * *2)) * np.exp(-transformer.kr**2/(4*a**2))
 			actual_f := transformer.IQDHT(ht)
 			expected_f := mat.NewVecDense(transformer.r.Len(), nil)
-			ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, expected_f, &transformer.r)
+			utils.ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, expected_f, &transformer.r)
 			// expected_f = np.exp(-a * *2 * transformer.r * *2)
-			assertInDeltaVec(t.T(), expected_f, actual_f, 1e-9, false)
+			testutils.AssertInDeltaVec(t.T(), expected_f, actual_f, 1e-9, false)
 		})
 	}
 }
@@ -318,17 +337,17 @@ func (t *RadialSuite) Test1OverR2plusZ2() {
 	for _, a := range []float64{2, 5, 10} {
 		t.Run(fmt.Sprint(a), func() {
 			f := mat.NewVecDense(t.radius.Len(), nil)
-			ApplyVec(func(r float64) float64 { return 1 / (math.Pow(r, 2) + math.Pow(a, 2)) }, f, &t.radius)
+			utils.ApplyVec(func(r float64) float64 { return 1 / (math.Pow(r, 2) + math.Pow(a, 2)) }, f, &t.radius)
 			// f = 1 / (transformer.r**2 + a**2)
 			// kn cannot handle complex arguments, so a must be real
 			expected_ht := mat.NewVecDense(t.radius.Len(), nil)
-			ApplyVec(func(k float64) float64 { return 2 * pi * math.Y0(a*k) }, expected_ht, &t.radius)
+			utils.ApplyVec(func(k float64) float64 { return 2 * pi * math.Y0(a*k) }, expected_ht, &t.radius)
 			//2 * np.pi * scipy_bessel.kn(0, a*transformer.kr)
 			actual_ht := transformer.QDHT(f)
 			// These tolerances are pretty loose, but there seems to be large
 			// error here
-			assertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01, false)
-			err := meanAbsError(expected_ht, actual_ht)
+			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01, false)
+			err := testutils.MeanAbsError(expected_ht, actual_ht)
 			assert.Less(t.T(), err, 4e-3)
 		})
 	}
@@ -352,10 +371,10 @@ func TestSinc(t *testing.T) {
 			v := transformer.v
 			gamma := 5.
 			fun := mat.NewVecDense(v.Len(), nil)
-			ApplyVec(func(r float64) float64 { return sinc(2.0 * pi * gamma * r) }, fun, &transformer.r)
+			utils.ApplyVec(func(r float64) float64 { return sinc(2.0 * pi * gamma * r) }, fun, &transformer.r)
 			expected_ht := mat.NewVecDense(fun.Len(), nil)
 
-			ApplyVec(func(v_ float64) float64 {
+			utils.ApplyVec(func(v_ float64) float64 {
 				pf := float64(p)
 				if v_ < gamma {
 					return (math.Pow(v_, pf) * math.Cos(pf*pi/2) /
@@ -401,134 +420,13 @@ func TestGeneralisedJincZero(t *testing.T) {
 					eps = 1e-5 / a
 				}
 				v := mat.NewVecDense(2, []float64{0, eps})
-				val := generalisedJinc(v, a, p)
+				val := testutils.GeneralisedJinc(v, a, p)
 
 				tolerance := 2e-9
 				assert.InDelta(t, val.AtVec(0), val.AtVec(1), tolerance)
 			})
 		}
 	}
-}
-
-// ----------------
-// HELPER FUNCTIONS
-// ----------------
-func meanAbsError(v1, v2 mat.Vector) float64 {
-	if v1.Len() != v2.Len() {
-		panic("vector sizes mismatched")
-	}
-	length := v1.Len()
-	sum := 0.
-	for i := 0; i < length; i++ {
-		err := math.Abs(v1.AtVec(i) - v2.AtVec(i))
-		sum += err
-	}
-	return sum / float64(length)
-}
-
-const ATOL_LIMIT = 2e-5
-
-func assertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64, relativeTol bool) {
-	assert.Equal(t, expected.Len(), actual.Len())
-	for i := 0; i < expected.Len(); i++ {
-		tol := precision
-		exp := expected.AtVec(i)
-		if relativeTol {
-			tol = math.Abs(precision * exp)
-			if tol < ATOL_LIMIT {
-				tol = ATOL_LIMIT
-			}
-		}
-		inDeltaRTol(t, exp, actual.AtVec(i), tol, relativeTol, "Index %d", i)
-	}
-}
-
-func inDeltaRTol(t *testing.T, expected, actual, precision float64, relativeTol bool, msgAndArgs ...any) {
-	tol := precision
-	if relativeTol {
-		tol = math.Abs(precision * expected)
-		if tol < ATOL_LIMIT {
-			tol = ATOL_LIMIT
-		}
-	}
-	assert.InDelta(t, expected, actual, tol, msgAndArgs...)
-}
-
-func assertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector,
-	precisionBody, precisionEnd float64, relativeTol bool) {
-
-	n := expected.Len()
-	assertInDeltaVec(
-		t,
-		expected.(*mat.VecDense).SliceVec(1, n-2),
-		actual.(*mat.VecDense).SliceVec(1, n-2),
-		precisionBody, relativeTol)
-	inDeltaRTol(t, expected.AtVec(0), actual.AtVec(0), precisionEnd, relativeTol)
-	inDeltaRTol(t, expected.AtVec(n-1), actual.AtVec(n-1), precisionEnd, relativeTol)
-}
-
-// ---------------
-// MATHS FUNCTIONS
-// ----------------
-func generalisedTopHat(r mat.Vector, a float64, p int) mat.Vector {
-	f := ApplyVec(func(val float64) float64 { return generalisedTopHatF(val, a, p) }, nil, r)
-	return f
-}
-
-func generalisedTopHatF(r float64, a float64, p int) float64 {
-	var val float64
-	if r <= a {
-		val = math.Pow(r, float64(p))
-	}
-	// othwerise 0
-
-	return val
-}
-
-func generalisedJinc(v mat.Vector, a float64, p int) mat.Vector {
-	f := ApplyVec(func(val float64) float64 { return generalisedJincF(val, a, p) }, nil, v)
-	return f
-}
-
-func generalisedJincF(v float64, a float64, p int) float64 {
-
-	var val float64
-	if v == 0. {
-		switch {
-		case p == -1:
-			val = math.Inf(1)
-		case p == -2:
-			val = -math.Pi
-		case p == 0:
-			val = math.Pi * math.Pow(a, 2)
-		default:
-			val = 0
-		}
-	} else {
-		prefactor := math.Pow(a, float64(p+1))
-		x := 2 * math.Pi * a * v
-		j := math.Jn(p+1, x)
-		val = prefactor * j / v
-	}
-
-	return val
-}
-
-// -------------
-// SUITE RUNNERS
-// -------------
-
-func TestSuite(t *testing.T) {
-	for order := 0; order <= maxOrder; order++ {
-		hs := new(HankelTestSuite)
-		hs.order = order
-		suite.Run(t, hs)
-	}
-}
-
-func TestRadialSuite(t *testing.T) {
-	s := new(RadialSuite)
-	suite.Run(t, s)
 }
 
 /*
