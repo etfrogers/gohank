@@ -241,6 +241,14 @@ func (t *HankelTransform) NPoints() int {
 	return t.nPoints
 }
 
+func (t *HankelTransform) Kr() mat.Vector {
+	return &t.kr
+}
+
+func (t *HankelTransform) Radius() mat.Vector {
+	return &t.r
+}
+
 func (t *HankelTransform) OriginalRadialGrid() mat.Vector {
 	/* Return the original radial grid used to construct the object, or raise a :class:`ValueError`
 	   if the constructor was not called specifying a ``radial_grid`` parameter.
