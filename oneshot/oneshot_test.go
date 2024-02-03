@@ -17,14 +17,13 @@ const pi = math.Pi
 
 const maxOrder int = 4
 
-type radialSuite struct {
+type RadialSuite struct {
 	suite.Suite
 	radius mat.VecDense
 }
 
 type OneShotTestSuite struct {
-	radialSuite
-	// transformer HankelTransform
+	RadialSuite
 	order int
 }
 
@@ -36,8 +35,12 @@ func TestSuite(t *testing.T) {
 	}
 }
 
-func (suite *radialSuite) SetupTest() {
+func (suite *RadialSuite) SetupTest() {
 	suite.radius = *utils.Linspace(0, 3, 1024)
+}
+
+func kToV(k mat.Vector) mat.Vector {
+	return utils.ApplyVec(func(f float64) float64 { return f / (2 * pi) }, nil, k)
 }
 
 func (t *OneShotTestSuite) TestJinc() {
@@ -45,23 +48,13 @@ func (t *OneShotTestSuite) TestJinc() {
 		t.Run(fmt.Sprint(a), func() {
 			f := testutils.GeneralisedJinc(&t.radius, a, t.order)
 			kr, actual_ht := oneshot.QDHT(&t.radius, f, t.order)
-			v := utils.ApplyVec(func(f float64) float64 { return f / (2 * pi) }, nil, kr)
+			v := kToV(kr)
 			expected_ht := testutils.GeneralisedTopHat(v, a, t.order)
 			err := testutils.MeanAbsError(expected_ht, actual_ht)
 			assert.Less(t.T(), err, 1e-3)
 		})
 	}
 }
-
-// @pytest.mark.parametrize('a', [1, 0.7, 0.1])
-// @pytest.mark.parametrize('order', orders)
-// def test_jinc(radius: np.ndarray, a: float, order: int):
-//     f = generalised_jinc(radius, a, order)
-//     kr, actual_ht = qdht(radius, f, order=order)
-//     v = kr / (2*np.pi)
-//     expected_ht = generalised_top_hat(v, a, order)
-//     error = np.mean(np.abs(expected_ht-actual_ht))
-//     assert error < 1e-3
 
 /*
 @pytest.mark.parametrize('two_d_size', [1, 35, 27])
@@ -88,36 +81,52 @@ def test_jinc2d(radius: np.ndarray, a: float, order: int, axis: int, two_d_size:
     assert error < 1e-3 * 4
 */
 
-// @pytest.mark.parametrize('order', orders)
-// @pytest.mark.parametrize('a', [1, 1.5, 0.1])
-// def test_top_hat(radius: np.ndarray, a: float, order: int):
-//     f = generalised_top_hat(radius, a, order)
-//     kr, actual_ht = qdht(radius, f, order)
-//     v = kr / (2 * np.pi)
-//     expected_ht = generalised_jinc(v, a, order)
-//     error = np.mean(np.abs(expected_ht-actual_ht))
-//     assert error < 1e-3
+func (t *OneShotTestSuite) TestTopHat() {
+	for _, a := range []float64{1, 1.5, 0.1} {
+		t.Run(fmt.Sprint(a), func() {
+			f := testutils.GeneralisedTopHat(&t.radius, a, t.order)
+			kr, actual_ht := oneshot.QDHT(&t.radius, f, t.order)
+			v := kToV(kr)
+			expected_ht := testutils.GeneralisedJinc(v, a, t.order)
+			assert.Less(t.T(), testutils.MeanAbsError(expected_ht, actual_ht), 1e-3)
+		})
+	}
+}
 
-// @pytest.mark.parametrize('a', [2, 5, 10])
-// def test_gaussian(a: float, radius: np.ndarray):
-//     # Note the definition in Guizar-Sicairos varies by 2*pi in
-//     # both scaling of the argument (so use kr rather than v) and
-//     # scaling of the magnitude.
-//     f = np.exp(-a ** 2 * radius ** 2)
-//     kr, actual_ht = qdht(radius, f)
-//     expected_ht = 2*np.pi*(1 / (2 * a**2)) * np.exp(-kr**2 / (4 * a**2))
-//     assert np.allclose(expected_ht, actual_ht)
+func (t *RadialSuite) TestGaussian() {
+	// Note the definition in Guizar-Sicairos varies by 2*pi in
+	// both scaling of the argument (so use kr rather than v) and
+	// scaling of the magnitude.
+	for _, a := range []float64{2, 5, 10} {
+		t.Run(fmt.Sprint(a), func() {
+			a2 := math.Pow(a, 2)
+			f := utils.ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, nil, &t.radius)
 
-// @pytest.mark.parametrize('a', [2, 5, 10])
-// def test_inverse_gaussian(a: float):
-//     # Note the definition in Guizar-Sicairos varies by 2*pi in
-//     # both scaling of the argument (so use kr rather than v) and
-//     # scaling of the magnitude.
-//     kr = np.linspace(0, 200, 1024)
-//     ht = 2*np.pi*(1 / (2 * a**2)) * np.exp(-kr**2 / (4 * a**2))
-//     r, actual_f = iqdht(kr, ht)
-//     expected_f = np.exp(-a ** 2 * r ** 2)
-//     assert np.allclose(expected_f, actual_f)
+			kr, actual_ht := oneshot.QDHT(&t.radius, f, 0)
+			expected_ht := utils.ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
+				nil, kr)
+			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-7, false)
+		})
+	}
+}
+
+func (t *RadialSuite) TestInverseGaussian() {
+	// Note the definition in Guizar-Sicairos varies by 2*pi in
+	// both scaling of the argument (so use kr rather than v) and
+	// scaling of the magnitude.
+	for _, a := range []float64{2, 5, 10} {
+		t.Run(fmt.Sprint(a), func() {
+			kr := utils.Linspace(0, 200, 1024)
+			a2 := math.Pow(a, 2)
+			ht := utils.ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) }, nil, kr)
+			// ht = 2 * nppi * (1 / (2 * a * *2)) * np.exp(-transformer.kr**2/(4*a**2))
+			r, actual_f := oneshot.IQDHT(kr, ht, 0)
+			expected_f := utils.ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, nil, r)
+			// expected_f = np.exp(-a * *2 * transformer.r * *2)
+			testutils.AssertInDeltaVec(t.T(), expected_f, actual_f, 1e-5, false)
+		})
+	}
+}
 
 /*
 @pytest.mark.parametrize('axis', [0, 1])

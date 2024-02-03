@@ -61,7 +61,7 @@ func IQDHT(k mat.Vector, f mat.Vector, order int) (r, ht mat.Vector) {
 	  :rtype: (:class:`numpy.ndarray`, :class:`numpy.ndarray`)
 	*/
 	transformer := gohank.NewTransformFromKGrid(order, k)
-	fTransform := transformer.ToTransformR(f)
+	fTransform := transformer.ToTransformK(f)
 	ht = transformer.IQDHT(fTransform)
 	return transformer.Radius(), ht
 
