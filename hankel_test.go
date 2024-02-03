@@ -9,67 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"gonum.org/v1/gonum/integrate"
 	"gonum.org/v1/gonum/mat"
 )
-
-/*from typing import Callable
-
-import numpy as np
-import pytest
-import scipy.special as scipy_bessel
-
-from pyhank import HankelTransform
-
-
-smooth_shapes = [lambda r: np.exp(-r ** 2),
-                 lambda r: r,
-                 lambda r: r ** 2,
-                 lambda r: 1 / np.sqrt(r**2 + 0.1**2)]
-
-all_shapes = smooth_shapes.copy()
-all_shapes.append(lambda r: np.random.random(r.size))
-
-orders = list(range(0, 5))
-
-@pytest.fixture(params=orders)
-def transformer(request, radius) -> HankelTransform:
-    order = request.param
-    return HankelTransform(order, radial_grid=radius)
-
-
-@pytest.mark.parametrize('shape', all_shapes)
-def test_parsevals_theorem(shape: Callable,
-                           radius: np.ndarray,
-                           transformer: HankelTransform):
-    // As per equation 11 of Guizar-Sicairos, the UNSCALED transform is unitary,
-    // i.e. if we pass in the unscaled fr (=Fr), the unscaled fv (=Fv)should have the
-    // same sum of abs val^2. Here the unscaled transform is simply given by
-    // ht = transformer.T @ func
-    func = shape(radius)
-    intensity_before = np.abs(func)**2
-    energy_before = np.sum(intensity_before)
-    ht = transformer.T @ func
-    intensity_after = np.abs(ht)**2
-    energy_after = np.sum(intensity_after)
-    assert np.isclose(energy_before, energy_after)
-
-
-@pytest.mark.parametrize('shape', [generalised_jinc, generalised_top_hat])
-def test_energy_conservation(shape: Callable,
-                             transformer: HankelTransform):
-    transformer = HankelTransform(transformer.order, 10, transformer.n_points)
-    func = shape(transformer.r, 0.5, transformer.order)
-    intensity_before = np.abs(func)**2
-    energy_before = np.trapz(y=intensity_before * 2 * np.pi * transformer.r,
-                             x=transformer.r)
-
-    ht = transformer.qdht(func)
-    intensity_after = np.abs(ht)**2
-    energy_after = np.trapz(y=intensity_after * 2 * np.pi * transformer.v,
-                            x=transformer.v)
-    assert np.isclose(energy_before, energy_after, rtol=0.01)
-
-*/
 
 const maxOrder int = 4
 
@@ -140,7 +82,6 @@ func (suite *RadialSuite) TestRoundTripRInterpolation() {
 			transform_func := transformer.ToTransformR(fun)
 			reconstructed_func := transformer.ToOriginalR(transform_func)
 			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
-			// assertInDeltaVec(suite.T(), fun, reconstructed_func, 1e-4, true)
 		})
 	}
 }
@@ -159,7 +100,6 @@ func (suite *RadialSuite) TestRoundTripKInterpolation() {
 			transform_func := transformer.ToTransformK(fun)
 			reconstructed_func := transformer.ToOriginalK(transform_func)
 			assertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
-			// assertInDeltaVec(suite.T(), fun, reconstructed_func, 1e-4, true)
 		})
 	}
 }
@@ -184,7 +124,6 @@ func (t *HankelTestSuite) TestRoundTripWithInterpolation() {
 				useRelTol = false
 			}
 			assertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, 2e-4, endTol, useRelTol)
-			// assertInDeltaVec(t.T(), fun, reconstructed, 1e-4, true)
 		})
 	}
 }
@@ -206,6 +145,63 @@ func TestOriginalRKGrid(t *testing.T) {
 	// no error
 	_ = transformer.OriginalKGrid()
 	assert.Panics(t, func() { transformer.OriginalRadialGrid() })
+}
+
+// ---------------
+// Test Invariants
+// ---------------
+func (t *HankelTestSuite) TestParsevalsTheorem() {
+	// As per equation 11 of Guizar-Sicairos, the UNSCALED transform is unitary,
+	// i.e. if we pass in the unscaled fr (=Fr), the unscaled fv (=Fv)should have the
+	// same sum of abs val^2. Here the unscaled transform is simply given by
+	// ht = transformer.T @ func
+	for _, shape := range all_shapes {
+		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
+			fun := ApplyVec(shape.f, nil, &t.radius)
+			intensityBefore := ApplyVec(intensity, nil, fun)
+			energyBefore := mat.Sum(intensityBefore)
+			ht := mat.NewVecDense(fun.Len(), nil)
+			ht.MulVec(&t.transformer.T, fun)
+			intensityAfter := ApplyVec(intensity, nil, ht)
+			energyAfter := mat.Sum(intensityAfter)
+			assert.InDelta(t.T(), energyBefore, energyAfter, 1e-8)
+		})
+	}
+}
+
+func intensity(v float64) float64 {
+	return math.Pow(math.Abs(v), 2)
+}
+
+func (t *HankelTestSuite) TestEnergyConservation() {
+	shapes := []struct {
+		name string
+		f    func(mat.Vector, float64, int) mat.Vector
+	}{{"Jinc", generalisedJinc},
+		{"Top Hat", generalisedTopHat}}
+
+	integrateOverR := func(r, y *mat.VecDense) float64 {
+		integrand := mat.NewVecDense(y.Len(), nil)
+		for i := 0; i < y.Len(); i++ {
+			integrand.SetVec(i, 2*pi*r.AtVec(i)*y.AtVec(i))
+		}
+		return integrate.Trapezoidal(r.RawVector().Data, integrand.RawVector().Data)
+	}
+
+	for _, shape := range shapes {
+		t.Run(fmt.Sprintf("%v, %v", shape.name, t.order), func() {
+			transformer := NewTransform(t.transformer.Order(), 10, t.transformer.NPoints())
+			fun := shape.f(&transformer.r, 0.5, transformer.Order())
+			intensityBefore := ApplyVec(intensity, nil, fun).(*mat.VecDense)
+			energyBefore := integrateOverR(&transformer.r, intensityBefore)
+
+			ht := transformer.QDHT(fun)
+			intensityAfter := ApplyVec(intensity, nil, ht).(*mat.VecDense)
+			energyAfter := integrateOverR(&transformer.v, intensityAfter)
+
+			assert.InDelta(t.T(), energyBefore, energyAfter, 0.006)
+		})
+	}
 }
 
 // -------------------
@@ -474,40 +470,47 @@ func assertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector,
 // ---------------
 // MATHS FUNCTIONS
 // ----------------
-func generalisedTopHat(r mat.Vector, a float64, p int) *mat.VecDense {
-	topHat := mat.NewVecDense(r.Len(), nil)
-	for i := 0; i < r.Len(); i++ {
-		if r.AtVec(i) <= a {
-			topHat.SetVec(i, math.Pow(r.AtVec(i), float64(p)))
-		}
-		// othwerise 0
-	}
-	return topHat
+func generalisedTopHat(r mat.Vector, a float64, p int) mat.Vector {
+	f := ApplyVec(func(val float64) float64 { return generalisedTopHatF(val, a, p) }, nil, r)
+	return f
 }
 
-func generalisedJinc(v mat.Vector, a float64, p int) *mat.VecDense {
-	val := mat.NewVecDense(v.Len(), nil)
-	for i := 0; i < v.Len(); i++ {
-		v_ := v.AtVec(i)
-		if v_ == 0. {
-			switch {
-			case p == -1:
-				val.SetVec(i, math.Inf(1))
-			case p == -2:
-				val.SetVec(i, -math.Pi)
-			case p == 0:
-				val.SetVec(i, math.Pi*math.Pow(a, 2))
-			default:
-				val.SetVec(i, 0)
-			}
-		} else {
-			prefactor := math.Pow(a, float64(p+1))
-			x := 2 * math.Pi * a * v.AtVec(i)
-			j := math.Jn(p+1, x)
-			elem := prefactor * j / v.AtVec(i)
-			val.SetVec(i, elem)
-		}
+func generalisedTopHatF(r float64, a float64, p int) float64 {
+	var val float64
+	if r <= a {
+		val = math.Pow(r, float64(p))
 	}
+	// othwerise 0
+
+	return val
+}
+
+func generalisedJinc(v mat.Vector, a float64, p int) mat.Vector {
+	f := ApplyVec(func(val float64) float64 { return generalisedJincF(val, a, p) }, nil, v)
+	return f
+}
+
+func generalisedJincF(v float64, a float64, p int) float64 {
+
+	var val float64
+	if v == 0. {
+		switch {
+		case p == -1:
+			val = math.Inf(1)
+		case p == -2:
+			val = -math.Pi
+		case p == 0:
+			val = math.Pi * math.Pow(a, 2)
+		default:
+			val = 0
+		}
+	} else {
+		prefactor := math.Pow(a, float64(p+1))
+		x := 2 * math.Pi * a * v
+		j := math.Jn(p+1, x)
+		val = prefactor * j / v
+	}
+
 	return val
 }
 
