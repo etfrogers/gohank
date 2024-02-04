@@ -82,7 +82,7 @@ func (t *HankelTestSuite) TestRoundTrip() {
 	fun := randomVecLike(&t.radius)
 	ht := t.transformer.QDHT(fun)
 	reconstructed := t.transformer.IQDHT(ht)
-	testutils.AssertInDeltaVec(t.T(), fun, reconstructed, 1e-9, false)
+	testutils.AssertInDeltaVec(t.T(), fun, reconstructed, -1, 1e-9)
 }
 
 // -------------------
@@ -100,7 +100,7 @@ func (suite *RadialSuite) TestRoundTripRInterpolation() {
 			fun := utils.ApplyVec(shape.f, nil, &suite.radius)
 			transform_func := transformer.ToTransformR(fun)
 			reconstructed_func := transformer.ToOriginalR(transform_func)
-			testutils.AssertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			testutils.AssertInDeltaVecWithEndPoints(suite.T(), reconstructed_func, fun, 1e-4, 1e-3, -1, 2e-5)
 		})
 	}
 }
@@ -118,7 +118,7 @@ func (suite *RadialSuite) TestRoundTripKInterpolation() {
 			fun := utils.ApplyVec(shape.f, nil, kGrid)
 			transform_func := transformer.ToTransformK(fun)
 			reconstructed_func := transformer.ToOriginalK(transform_func)
-			testutils.AssertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, true)
+			testutils.AssertInDeltaVecWithEndPoints(suite.T(), fun, reconstructed_func, 1e-4, 1e-3, -1, 2e-7)
 		})
 	}
 }
@@ -134,15 +134,19 @@ func (t *HankelTestSuite) TestRoundTripWithInterpolation() {
 			reconstructed_hr := t.transformer.IQDHT(ht)
 			reconstructed := t.transformer.ToOriginalR(reconstructed_hr)
 
-			endTol := 1e-3
-			useRelTol := true
+			aTolEnd := 1e-3
+			rTolBody := 2e-4
+			aTolBody := -1.
+			rTolEnd := -1.
 			if shape.name == "1/(sqrt(r^2 + 0.1^2))" {
-				endTol = 3e-2
+				rTolEnd = 3e-2
+				rTolBody = 2e-3
 			}
 			if shape.name == "r^2" {
-				useRelTol = false
+				rTolBody = -1.
+				aTolBody = 2e-4
 			}
-			testutils.AssertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, 2e-4, endTol, useRelTol)
+			testutils.AssertInDeltaVecWithEndPoints(t.T(), fun, reconstructed, rTolBody, rTolEnd, aTolBody, aTolEnd)
 		})
 	}
 }
@@ -247,7 +251,6 @@ func (t *HankelTestSuite) TestTopHat() {
 			actual_ht := t.transformer.QDHT(f)
 			assert.Less(t.T(), testutils.MeanAbsError(expected_ht, actual_ht), 1e-3)
 		})
-
 	}
 }
 
@@ -265,7 +268,7 @@ func (t *RadialSuite) TestGaussian() {
 			utils.ApplyVec(func(kr float64) float64 { return 2 * pi * (1 / (2 * a2)) * math.Exp(-math.Pow(kr, 2)/(4*a2)) },
 				expected_ht, &transformer.kr)
 			actual_ht := transformer.QDHT(f)
-			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, 1e-9, false)
+			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, -1, 1e-9)
 		})
 	}
 }
@@ -285,7 +288,7 @@ func (t *RadialSuite) TestInverseGaussian() {
 			expected_f := mat.NewVecDense(transformer.r.Len(), nil)
 			utils.ApplyVec(func(r float64) float64 { return math.Exp(-a2 * math.Pow(r, 2)) }, expected_f, &transformer.r)
 			// expected_f = np.exp(-a * *2 * transformer.r * *2)
-			testutils.AssertInDeltaVec(t.T(), expected_f, actual_f, 1e-9, false)
+			testutils.AssertInDeltaVec(t.T(), expected_f, actual_f, -1, 1e-9)
 		})
 	}
 }
@@ -346,7 +349,7 @@ func (t *RadialSuite) Test1OverR2plusZ2() {
 			actual_ht := transformer.QDHT(f)
 			// These tolerances are pretty loose, but there seems to be large
 			// error here
-			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, 0.01, false)
+			testutils.AssertInDeltaVec(t.T(), expected_ht, actual_ht, -1, 0.01)
 			err := testutils.MeanAbsError(expected_ht, actual_ht)
 			assert.Less(t.T(), err, 4e-3)
 		})

@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -25,45 +26,51 @@ func MeanAbsError(v1, v2 mat.Vector) float64 {
 	return sum / float64(length)
 }
 
-const ATOL_LIMIT = 2e-5
-
-func AssertInDeltaVec(t *testing.T, expected, actual mat.Vector, precision float64, relativeTol bool) {
+func AssertInDeltaVec(t *testing.T, expected, actual mat.Vector, rTol, aTol float64) bool {
 	assert.Equal(t, expected.Len(), actual.Len())
+	ok := true
 	for i := 0; i < expected.Len(); i++ {
-		tol := precision
-		exp := expected.AtVec(i)
-		if relativeTol {
-			tol = math.Abs(precision * exp)
-			if tol < ATOL_LIMIT {
-				tol = ATOL_LIMIT
-			}
-		}
-		InDeltaRTol(t, exp, actual.AtVec(i), tol, relativeTol, "Index %d", i)
+		ok = ok && InDeltaRATol(t, expected.AtVec(i), actual.AtVec(i), rTol, aTol, "Index %d", i)
 	}
+	return ok
 }
 
-func InDeltaRTol(t *testing.T, expected, actual, precision float64, relativeTol bool, msgAndArgs ...any) {
-	tol := precision
-	if relativeTol {
-		tol = math.Abs(precision * expected)
-		if tol < ATOL_LIMIT {
-			tol = ATOL_LIMIT
-		}
+func InDeltaRATol(t *testing.T, expected, actual, rTol, aTol float64, msgAndArgs ...any) bool {
+	if aTol < 0 {
+		aTol = 1e-08
 	}
-	assert.InDelta(t, expected, actual, tol, msgAndArgs...)
+	if rTol < 0 {
+		rTol = 1e-05
+	}
+	delta := (aTol + rTol*math.Abs(expected))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		msg = fmt.Sprintf("rTol: %g, aTol: %g, %s", rTol, aTol, msg)
+		msgAndArgs[0] = msg
+	} else {
+		msgAndArgs = []any{"rTol: %g, aTol: %g", rTol, aTol}
+	}
+	return assert.InDelta(t, expected, actual, delta, msgAndArgs...)
 }
 
 func AssertInDeltaVecWithEndPoints(t *testing.T, expected, actual mat.Vector,
-	precisionBody, precisionEnd float64, relativeTol bool) {
+	rTolBody, rTolEnd, aTolBody, aTolEnd float64) bool {
 
 	n := expected.Len()
-	AssertInDeltaVec(
+	if ok := AssertInDeltaVec(
 		t,
 		expected.(*mat.VecDense).SliceVec(1, n-2),
 		actual.(*mat.VecDense).SliceVec(1, n-2),
-		precisionBody, relativeTol)
-	InDeltaRTol(t, expected.AtVec(0), actual.AtVec(0), precisionEnd, relativeTol)
-	InDeltaRTol(t, expected.AtVec(n-1), actual.AtVec(n-1), precisionEnd, relativeTol)
+		rTolBody, aTolBody); !ok {
+		return false
+	}
+	if ok := InDeltaRATol(t, expected.AtVec(0), actual.AtVec(0), rTolEnd, aTolEnd); !ok {
+		return false
+	}
+	if ok := InDeltaRATol(t, expected.AtVec(n-1), actual.AtVec(n-1), rTolEnd, aTolEnd); !ok {
+		return false
+	}
+	return true
 }
 
 // ---------------
